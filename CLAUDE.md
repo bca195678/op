@@ -12,8 +12,6 @@ PYTHON=./wpy64/python/python.exe
 
 All skills reference `"$PYTHON"` — never redeclare `PYTHON` inside a skill. Pre-installed packages: `pyserial`, `pytest`, `psutil`, `requests`, `python-dotenv`, `opencv-python`, `tftpy`.
 
-**Exception:** The `mfgtest` skill has its own isolated WinPython at `./tmp/mfgtest/wpy64/`. It uses `$MFGTEST_PYTHON` (not `$PYTHON`) to avoid clobbering the project-wide variable.
-
 ## Available Skills
 
 This repo ships Claude Code skills invokable via slash commands:
@@ -23,15 +21,11 @@ This repo ships Claude Code skills invokable via slash commands:
 | UART | `/uart` | Serial console interaction with embedded devices |
 | Deploy | `/deploy` | Transfer and execute files on embedded devices via HTTP+wget |
 | Power | `/power` | Control Aviosys IP Power 9258W2 outlets (on/off/toggle/cycle/status) |
-| Picoclaw | `/picoclaw` | Deploy and run the picoclaw LLM agent on the device (network setup, CA certs, clock fix, agent/gateway launch) |
 | Fabrick | `/fabrick` | SSH to the remote source/build server (172.31.230.36) for any task: git operations, builds (docker.sh + make), scripts, file management |
 | Netboot | `/netboot` | TFTP-boot a firmware image from Host into STARK via U-Boot (device must be at u-boot> prompt) |
-| Checkspec | `/checkspec` | Sparse-checkout spec/CLI docs from Gitea, then answer questions or execute tasks on the DUT based on the spec — on demand, no full doc load |
 | Ledcam | `/ledcam` | USB camera LED color detection for STARK front panel — calibrate, live feed, ROI selection (with profiles), and detect (green/amber/off) |
-| Luascript | `/luascript` | Deploy, register, and run custom LuaCLI scripts on the STARK DUT |
-| Mfgtest | `/mfgtest` | Clone mfgtest repo, set up WinPython, configure stage/SKU, override COM port, and run pytest manufacturing tests |
 | Standup | `/standup` | Set up WinPython environment — extract installer, install pip packages, verify (counterpart to /teardown) |
-| Teardown | `/teardown` | Clean up session state — kill HTTP servers, stop picoclaw, optionally remove NAT and power off DUT |
+| Teardown | `/teardown` | Clean up session state — kill HTTP servers, optionally remove NAT and power off DUT |
 
 Detailed skill documentation is in `.claude/skills/<skill>/SKILL.md`.
 
@@ -72,11 +66,7 @@ All host-side logs, downloaded images, spec checkouts, and other transient files
 | UART / serial session logs | `./tmp/uart-session.log` |
 | Netboot log | `./tmp/netboot.log` |
 | Deploy log | `./tmp/deploy.log` |
-| Picoclaw log | `./tmp/picoclaw.log` |
-| Checkspec log | `./tmp/checkspec.log` |
-| Lua scripts (host staging) | `./tmp/<script>.lua` |
 | Batch command scripts | `./tmp/cmds.txt` |
-| Mfgtest repo (working copy) | `./tmp/mfgtest/` |
 
 `./tmp/` is gitignored. Always `mkdir -p ./tmp` before writing to it.
 
@@ -98,7 +88,3 @@ Always ask for explicit permission before running `git commit` or `git push`. Ne
 
 1. Open `vspe_setup.vspe` to start virtual COM port (required for COM200)
 2. Run `.\ps-setup.ps1` to open split terminal layout (4 panes: serial, build server SSH, etc.)
-
-### Picoclaw Agent
-
-`.claude/skills/picoclaw/` contains the picoclaw multi-channel LLM agent binary, `config.json`, and NAT helper scripts. Configured for Claude (`claude-sonnet-4.6`, max 32k tokens, up to 50 tool iterations). Used to relay Claude interactions across messaging channels (Telegram, Slack, etc.).
