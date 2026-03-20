@@ -16,40 +16,41 @@ Transfers a firmware image from the Host PC to the STARK over TFTP and boots it 
 ## Environment Variables
 
 ```
-HELPER     = .claude/skills/uart/serial_helper.py
-TFTP_SRV   = .claude/skills/netboot/tftp_server.py
-PORT       = COM200
-BAUD       = 115200
-PROMPT_UBT = u-boot>
-PROMPT_LNX = alphadiags:~#
-HOST_IP    = 30.0.0.1
-DUT_IP     = 30.0.0.100
-LOAD_ADDR  = 0x70000000
-IMAGE      = summit-stark.0.0.2-b5
-IMAGE_DIR  = ./tmp
+HELPER      = .claude/skills/uart/serial_helper.py
+TFTP_SRV    = .claude/skills/netboot/tftp_server.py
+PORT        = COM200
+BAUD        = 115200
+PROMPT_UBT  = u-boot>
+PROMPT_LNX  = alphadiags:/#
+HOST_IP     = 30.0.0.1
+DUT_IP      = 30.0.0.100
+LOAD_ADDR   = 0x70000000
+BUILD_SERVER = chester@172.31.230.36
+IMAGE_REMOTE = ~/project/opdiag/stark-diag/image
+IMAGE_DIR    = ./tmp
 ```
+
+> **IMAGE is not hardcoded.** The image name changes between builds. Always discover it dynamically in Step 1.
 
 ## Step-by-Step Workflow
 
-### 1. Fetch Image from Build Server
+### 1. Discover and Fetch Image from Build Server
 
-Copy the firmware image from the remote build server to `./tmp/` on the Host:
+List available images on the remote server, then fetch the latest:
 
 ```bash
+# Discover image name (exclude .md5 and .gz files)
+IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/stark-diag/image/ | grep -v -E "\.(md5|gz)$"')
+echo "Image found: $IMAGE"
+
+# Fetch image and checksum
 mkdir -p ./tmp
-scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/summit-stark.0.0.2-b5 \
-    chester@172.31.230.36:~/project/opdiag/stark-diag/image/summit-stark.0.0.2-b5.md5 \
+scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE" \
+    chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE".md5 \
     ./tmp/
 ```
 
-Expected files:
-
-| File | Description |
-|------|-------------|
-| `summit-stark.0.0.2-b5` | Firmware image |
-| `summit-stark.0.0.2-b5.md5` | MD5 checksum |
-
-> Skip this step if the image is already in `./tmp/`.
+> Skip this step if the image is already in `./tmp/`. To find the image name locally: `ls ./tmp/*.md5 | sed 's/\.md5$//' | xargs -I{} basename {}`
 
 ### 2. Start TFTP Server on Host (background)
 
@@ -71,10 +72,12 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 
 ### 4. TFTP Download + Boot
 
+Use the `$IMAGE` variable discovered in Step 1:
+
 ```bash
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
-  --device COM200 --baud 115200 --prompt "alphadiags:~#" --timeout 180 \
-  --command "tftpboot 0x70000000 summit-stark.0.0.2-b5; bootm 0x70000000" \
+  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 180 \
+  --command "tftpboot 0x70000000 $IMAGE && bootm 0x70000000" \
   --raw --logfile ./tmp/netboot.log
 ```
 
@@ -87,10 +90,12 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 ## Complete Example
 
 ```bash
-# 1. Fetch image from build server
+# 1. Discover and fetch image
+IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/stark-diag/image/ | grep -v -E "\.(md5|gz)$"')
+echo "Image: $IMAGE"
 mkdir -p ./tmp
-scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/summit-stark.0.0.2-b5 \
-    chester@172.31.230.36:~/project/opdiag/stark-diag/image/summit-stark.0.0.2-b5.md5 \
+scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE" \
+    chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE".md5 \
     ./tmp/
 
 # 2. Start TFTP server in background (60s window)
@@ -106,18 +111,18 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 
 # 4. Download and boot (waits up to 180s for Linux prompt)
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
-  --device COM200 --baud 115200 --prompt "alphadiags:~#" --timeout 180 \
-  --command "tftpboot 0x70000000 summit-stark.0.0.2-b5; bootm 0x70000000" \
+  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 180 \
+  --command "tftpboot 0x70000000 $IMAGE && bootm 0x70000000" \
   --raw --logfile ./tmp/netboot.log
 ```
 
 Expected boot sequence:
-1. PHY autoneg → TFTP transfer (~25s at ~1.9 MiB/s for 43M image)
+1. PHY autoneg → TFTP transfer (~25s at ~1.9 MiB/s for ~45M image)
 2. FIT image parsing and CRC verification
 3. Kernel decompress + ramdisk load
 4. Linux boot messages
 5. Python package install (`/alpha/whl/...`)
-6. `alphadiags:~#` prompt ready
+6. `alphadiags:/#` prompt ready
 
 ---
 

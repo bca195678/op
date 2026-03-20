@@ -13,7 +13,7 @@ Interact with embedded devices over a UART serial connection using the Python se
 HELPER  = .claude/skills/uart/serial_helper.py
 PORT    = COM200
 BAUD    = 115200
-PROMPT  = alphadiags:~#        # adjust for your device
+PROMPT  = alphadiags:/#        # adjust for your device
 LOG     = ./tmp/uart-session.log
 ```
 
@@ -71,7 +71,7 @@ Output:
 ## Common Prompt Patterns
 
 ```bash
---prompt "alphadiags:~#"          # AXN-2020 Linux shell
+--prompt "alphadiags:/#"          # AXN-2020 Linux shell
 --prompt "Marvell>>"              # AXN-2020 U-Boot
 --prompt "[#\$]\s*$"              # Generic root/user shell
 --prompt "=>\s*$"                 # U-Boot (generic)
@@ -91,7 +91,7 @@ The device boot sequence on AXN-2020 produces:
 1. Kernel messages (`[  x.xxxxxx] ...`)
 2. Python package installation (`Processing /alpha/whl/...`)
 3. `Scanning devices...`
-4. `alphadiags:~#` prompt ready
+4. `alphadiags:/#` prompt ready
 
 **AXN-2020 boots in ~120+ seconds** — the first 120s wait will often time out mid-boot. Simply run the same command again; it will catch the prompt as soon as it appears.
 

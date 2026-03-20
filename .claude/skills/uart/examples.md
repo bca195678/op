@@ -9,7 +9,7 @@ PYTHON=$PYTHON  # set per CLAUDE.md
 HELPER=.claude/skills/uart/serial_helper.py
 PORT=COM200
 BAUD=115200
-PROMPT="alphadiags:~#"
+PROMPT="alphadiags:/#"
 LOG=./output-1234.log
 ```
 

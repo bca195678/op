@@ -9,7 +9,7 @@ This guide explains how to monitor and observe what's happening on the serial co
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
   --device COM200 \
   --baud 115200 \
-  --prompt "alphadiags:~#" \
+  --prompt "alphadiags:/#" \
   --logfile ./session.log \
   --interactive
 ```
@@ -34,12 +34,12 @@ Session started: 2025-10-19T23:20:27.384436
 Device: COM200 @ 115200 baud
 ============================================================
 
-alphadiags:~#
-alphadiags:~# uname -a
+alphadiags:/#
+alphadiags:/# uname -a
 Linux alphadiags 5.10.0 #1 SMP Mon Jan 1 00:00:00 UTC 2024 aarch64 GNU/Linux
 
-alphadiags:~#
-alphadiags:~# ifconfig
+alphadiags:/#
+alphadiags:/# ifconfig
 eth0  Link encap:Ethernet  HWaddr 00:11:22:33:44:55
       inet addr:10.0.0.2  Bcast:10.0.0.255  Mask:255.255.255.0
 [...]
@@ -84,7 +84,7 @@ sudo socat /dev/ttyUSB0,raw,echo=0,b115200 /tmp/vserial0
 ```bash
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
   --device /tmp/vserial1 \
-  --prompt "alphadiags:~#" \
+  --prompt "alphadiags:/#" \
   --interactive
 ```
 
@@ -182,7 +182,7 @@ cat /dev/ttyUSB0 | tee ./spy.log
 # Terminal 1 — interactive with debug output
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
   --device COM200 \
-  --prompt "alphadiags:~#" \
+  --prompt "alphadiags:/#" \
   --logfile ./debug.log \
   --debug \
   --interactive
@@ -255,7 +255,7 @@ sleep 1
 # Terminal 1 — run with logging
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
   --device COM200 --baud 115200 \
-  --prompt "alphadiags:~#" \
+  --prompt "alphadiags:/#" \
   --logfile ./session.log \
   --interactive
 

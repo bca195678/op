@@ -56,7 +56,7 @@ Two machines are involved in this project:
 Standard configuration for the AXN-2020 network switch platform:
 
 - **Serial port:** COM200, 115200 baud
-- **Linux shell prompt:** `alphadiags:~#`
+- **Linux shell prompt:** `alphadiags:/#`
 - **U-Boot prompt:** `Marvell>>`
 - **Login required:** No (engineering sample)
 - **Topology file:** `./axn-2020/i2c-topology.md`

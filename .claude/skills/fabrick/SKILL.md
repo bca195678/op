@@ -1,6 +1,6 @@
 ---
 name: fabrick
-description: SSH into the remote Linux server (chester@172.19.176.168) for any task — git operations, builds via docker.sh + make, script execution, file management, or log inspection. Use when the user needs to work on the remote source/build server.
+description: SSH into the remote Linux server (chester@172.31.230.36) for any task — git operations, builds via docker.sh + make, script execution, file management, or log inspection. Use when the user needs to work on the remote source/build server.
 ---
 
 # fabrick
@@ -10,9 +10,8 @@ SSHes into the remote source/build server to perform any task: git operations, D
 ## Environment Variables
 
 ```
-BUILD_SERVER = chester@172.19.176.168
-REPO_URL     = http://172.19.176.173:10000/AXON/axn2020-diag.git
-REPO_DIR     = axn2020-diag
+BUILD_SERVER = chester@172.31.230.36
+PROJECT_DIR  = project/opdiag/stark-diag
 JOBS         = 16
 ```
 
@@ -24,43 +23,43 @@ The `fabrick` skill covers any SSH task on the build server, not just builds. Co
 
 ```bash
 # Clone or update repo
-ssh chester@172.19.176.168 'cd axn2020-diag && git pull && echo "PULL OK"'
+ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && git pull && echo "PULL OK"'
 
 # Check status / recent log
-ssh chester@172.19.176.168 'cd axn2020-diag && git status && git log --oneline -5'
+ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && git status && git log --oneline -5'
 
 # Create a branch
-ssh chester@172.19.176.168 'cd axn2020-diag && git checkout -b feature/my-branch && echo "BRANCH OK"'
+ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && git checkout -b feature/my-branch && echo "BRANCH OK"'
 
 # Fetch all remotes
-ssh chester@172.19.176.168 'cd axn2020-diag && git fetch --all && echo "FETCH OK"'
+ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && git fetch --all && echo "FETCH OK"'
 ```
 
 ### Script Execution
 
 ```bash
 # Run an arbitrary script on the server
-ssh chester@172.19.176.168 'cd axn2020-diag && bash ./scripts/my-script.sh 2>&1 | tee /tmp/script.log'
+ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && bash ./scripts/my-script.sh 2>&1 | tee /tmp/script.log'
 ```
 
 ### File Management
 
 ```bash
 # Check disk usage and build output
-ssh chester@172.19.176.168 'df -h && ls -lh axn2020-diag/build/'
+ssh chester@172.31.230.36 'df -h && ls -lh project/opdiag/stark-diag/build/'
 
 # Copy a file to a specific location
-ssh chester@172.19.176.168 'cp axn2020-diag/build/output.bin /tmp/'
+ssh chester@172.31.230.36 'cp project/opdiag/stark-diag/build/output.bin /tmp/'
 ```
 
 ### Log Inspection
 
 ```bash
 # Tail any log file
-ssh chester@172.19.176.168 'tail -50 /tmp/fabrick-task.log'
+ssh chester@172.31.230.36 'tail -50 /tmp/fabrick-task.log'
 
 # Search for errors
-ssh chester@172.19.176.168 'grep -i error /tmp/fabrick-task.log | tail -20'
+ssh chester@172.31.230.36 'grep -i error /tmp/fabrick-task.log | tail -20'
 ```
 
 ---
@@ -70,7 +69,7 @@ ssh chester@172.19.176.168 'grep -i error /tmp/fabrick-task.log | tail -20'
 ### 1. Check SSH Connectivity
 
 ```bash
-ssh -o ConnectTimeout=10 -o BatchMode=yes chester@172.19.176.168 echo "SSH OK"
+ssh -o ConnectTimeout=10 -o BatchMode=yes chester@172.31.230.36 echo "SSH OK"
 ```
 
 If this fails, fall back to password auth (omit `-o BatchMode=yes`) or troubleshoot the server.
@@ -79,27 +78,14 @@ If this fails, fall back to password auth (omit `-o BatchMode=yes`) or troublesh
 
 Check if the repo already exists; pull if it does, clone fresh if it doesn't.
 
-> **Gitea auth:** The HTTP remote requires credentials. Embed them in the URL as `http://user:password@host/...`. Default account: `chester:chestercheng`.
-
 ```bash
-ssh chester@172.19.176.168 '
-  REPO="http://chester:chestercheng@172.19.176.173:10000/AXON/axn2020-diag.git"
-  if [ -d axn2020-diag/.git ]; then
+ssh chester@172.31.230.36 '
+  if [ -d project/opdiag/stark-diag/.git ]; then
     echo "Repo exists — pulling latest..."
-    cd axn2020-diag && git pull "$REPO" && echo "PULL OK"
+    cd project/opdiag/stark-diag && git pull && echo "PULL OK"
   else
-    echo "Cloning fresh..."
-    git clone "$REPO" && echo "CLONE OK"
+    echo "Directory not found or not a git repo"
   fi
-'
-```
-
-To force a clean re-clone (wipe and start fresh):
-
-```bash
-ssh chester@172.19.176.168 '
-  rm -rf axn2020-diag
-  git clone http://chester:chestercheng@172.19.176.173:10000/AXON/axn2020-diag.git && echo "CLONE OK"
 '
 ```
 
@@ -111,8 +97,8 @@ Run the full build with live output (10–30 minutes). Set Bash tool `timeout: 1
 
 ```bash
 mkdir -p ./tmp
-ssh -tt -o ServerAliveInterval=60 chester@172.19.176.168 \
-  'cd axn2020-diag && bash docker.sh make all -j16 2>&1 | tee /tmp/build.log; echo "BUILD_EXIT:$?"' \
+ssh -tt -o ServerAliveInterval=60 chester@172.31.230.36 \
+  'cd project/opdiag/stark-diag && bash docker.sh make all -j16 2>&1 | tee /tmp/build.log; echo "BUILD_EXIT:$?"' \
   | tee -a ./tmp/build.log
 ```
 
@@ -122,9 +108,9 @@ Output streams line-by-line as the build progresses. `tee /tmp/build.log` saves 
 
 > **Background fallback** — if you need to disconnect mid-build, use `nohup` instead and reconnect later with `tail -f`:
 > ```bash
-> ssh chester@172.19.176.168 'cd axn2020-diag && nohup script -qfc "bash docker.sh make all -j16" /tmp/build.log > /dev/null 2>&1 &'
+> ssh chester@172.31.230.36 'cd project/opdiag/stark-diag && nohup script -qfc "bash docker.sh make all -j16" /tmp/build.log > /dev/null 2>&1 &'
 > # Later:
-> ssh chester@172.19.176.168 'tail -f /tmp/build.log'
+> ssh chester@172.31.230.36 'tail -f /tmp/build.log'
 > ```
 
 ---
@@ -134,46 +120,33 @@ Output streams line-by-line as the build progresses. `tee /tmp/build.log` saves 
 ### Scenario A — docker.sh is a setup script (exits before make)
 
 ```bash
-BUILD_SERVER="chester@172.19.176.168"
-REPO_URL="http://172.19.176.173:10000/AXON/axn2020-diag.git"
+BUILD_SERVER="chester@172.31.230.36"
 
 # 1. Verify SSH
 ssh -o ConnectTimeout=10 "$BUILD_SERVER" echo "SSH OK"
 
-# 2. Clone or update
-ssh "$BUILD_SERVER" '
-  if [ -d axn2020-diag/.git ]; then
-    cd axn2020-diag && git pull
-  else
-    git clone http://172.19.176.173:10000/AXON/axn2020-diag.git
-  fi
-'
+# 2. Update
+ssh "$BUILD_SERVER" 'cd project/opdiag/stark-diag && git pull'
 
 # 3. Docker setup
-ssh "$BUILD_SERVER" 'cd axn2020-diag && bash docker.sh'
+ssh "$BUILD_SERVER" 'cd project/opdiag/stark-diag && bash docker.sh'
 
 # 4. Build (long — run in background)
-ssh "$BUILD_SERVER" 'cd axn2020-diag && make all -j16 2>&1 | tee /tmp/build.log; echo "EXIT:$?"'
+ssh "$BUILD_SERVER" 'cd project/opdiag/stark-diag && make all -j16 2>&1 | tee /tmp/build.log; echo "EXIT:$?"'
 ```
 
 ### Scenario B — docker.sh wraps the build command (live streaming)
 
 ```bash
-BUILD_SERVER="chester@172.19.176.168"
+BUILD_SERVER="chester@172.31.230.36"
 
-# Clone or update
-ssh "$BUILD_SERVER" '
-  if [ -d axn2020-diag/.git ]; then
-    cd axn2020-diag && git pull
-  else
-    git clone http://172.19.176.173:10000/AXON/axn2020-diag.git
-  fi
-'
+# Update
+ssh "$BUILD_SERVER" 'cd project/opdiag/stark-diag && git pull'
 
 # Build inside Docker — foreground, live output (Bash tool timeout: 1800000)
 mkdir -p ./tmp
 ssh -tt -o ServerAliveInterval=60 "$BUILD_SERVER" \
-  'cd axn2020-diag && bash docker.sh make all -j16 2>&1 | tee /tmp/build.log; echo "BUILD_EXIT:$?"' \
+  'cd project/opdiag/stark-diag && bash docker.sh make all -j16 2>&1 | tee /tmp/build.log; echo "BUILD_EXIT:$?"' \
   | tee -a ./tmp/build.log
 ```
 
@@ -182,13 +155,13 @@ ssh -tt -o ServerAliveInterval=60 "$BUILD_SERVER" \
 If a build was started with `nohup` and you need to reconnect to watch progress:
 
 ```bash
-ssh chester@172.19.176.168 'tail -f /tmp/build.log'
+ssh chester@172.31.230.36 'tail -f /tmp/build.log'
 ```
 
 Or check if make is still running:
 
 ```bash
-ssh chester@172.19.176.168 'pgrep -a make || echo "make not running"'
+ssh chester@172.31.230.36 'pgrep -a make || echo "make not running"'
 ```
 
 ---
@@ -197,21 +170,20 @@ ssh chester@172.19.176.168 'pgrep -a make || echo "make not running"'
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `ssh: Connection refused` | Server down or wrong IP | `ping 172.19.176.168` from Host to verify reachability |
-| `Permission denied (publickey)` | SSH key not installed | `ssh-copy-id chester@172.19.176.168` from Host, or use password auth |
-| `git clone: could not read...` | Gitea server unreachable from build server | Verify `curl http://172.19.176.173:10000` from inside the build server |
-| `docker.sh: Permission denied` | Script not executable | `ssh chester@172.19.176.168 'chmod +x axn2020-diag/docker.sh'` |
+| `ssh: Connection refused` | Server down or wrong IP | `ping 172.31.230.36` from Host to verify reachability |
+| `Permission denied (publickey)` | SSH key not installed | `ssh-copy-id chester@172.31.230.36` from Host, or use password auth |
+| `docker.sh: Permission denied` | Script not executable | `ssh chester@172.31.230.36 'chmod +x project/opdiag/stark-diag/docker.sh'` |
 | `docker: command not found` | Docker not installed on build server | Contact server admin; verify with `ssh ... which docker` |
 | `make: *** [...] Error 1` | Compile error | Check `/tmp/build.log`; `ssh ... 'tail -50 /tmp/build.log'` |
-| Build stalls mid-way | Stale objects or partial clone | Force re-clone (Step 2 clean variant) and rebuild |
+| Build stalls mid-way | Stale objects or partial clone | Force re-clone and rebuild |
 | SSH drops on long build | Server idle timeout | Use `ssh -o ServerAliveInterval=60 ...` or run build via `nohup` |
 
 ## Tips
 
 - Pipe build output to `/tmp/build.log` with `tee` so you can review errors even after the SSH session ends.
-- Use `nohup` + `&` to survive SSH disconnects: `ssh ... 'cd axn2020-diag && nohup make all -j16 > /tmp/build.log 2>&1 &'`
-- To tail the log from a new SSH connection: `ssh chester@172.19.176.168 'tail -f /tmp/build.log'`
-- To clean and rebuild: `ssh ... 'cd axn2020-diag && make clean && make all -j16'`
+- Use `nohup` + `&` to survive SSH disconnects: `ssh ... 'cd project/opdiag/stark-diag && nohup make all -j16 > /tmp/build.log 2>&1 &'`
+- To tail the log from a new SSH connection: `ssh chester@172.31.230.36 'tail -f /tmp/build.log'`
+- To clean and rebuild: `ssh ... 'cd project/opdiag/stark-diag && make clean && make all -j16'`
 
 ---
 
@@ -219,20 +191,20 @@ ssh chester@172.19.176.168 'pgrep -a make || echo "make not running"'
 
 Use this workflow when you need to build several independent variants simultaneously (e.g. different LED patterns, feature branches). The main Claude agent creates git worktrees sequentially (fast), then spawns one `fabrick` background agent per worktree (slow — 10–30 min each), all launched in parallel.
 
-> **Simple rebuild (no worktrees):** The `fabrick` agent works for any server-side directory — just pass `CMD=bash docker.sh make all -j16` and `WORK_DIR=axn2020-diag` to build the base repo.
+> **Simple rebuild (no worktrees):** The `fabrick` agent works for any server-side directory — just pass `CMD=bash docker.sh make all -j16` and `WORK_DIR=project/opdiag/stark-diag` to build the base repo.
 
 ### Prerequisites
 
-- The base `axn2020-diag/` repo must already exist on the build server (run Steps 1–3 of this skill first if needed).
-- The branches or commits to build must exist in the remote Gitea repo.
+- The base `project/opdiag/stark-diag/` repo must already exist on the build server (run Steps 1–3 of this skill first if needed).
+- The branches or commits to build must exist in the remote repo.
 
 ### Step 1 — Create Worktrees on the Server (Main Agent, Sequential)
 
-Worktrees are lightweight checkouts sharing the `.git` object store. Place them one level up from `axn2020-diag/` (i.e. `~/worktrees/`) so `docker.sh` resolves relative paths identically to the base repo.
+Worktrees are lightweight checkouts sharing the `.git` object store. Place them under `~/worktrees/` so `docker.sh` resolves relative paths identically to the base repo.
 
 ```bash
-ssh chester@172.19.176.168 '
-  cd axn2020-diag
+ssh chester@172.31.230.36 '
+  cd project/opdiag/stark-diag
   git fetch --all
   git worktree add ../worktrees/wt1 <branch-1>
   git worktree add ../worktrees/wt2 <branch-2>
@@ -243,7 +215,7 @@ ssh chester@172.19.176.168 '
 
 Verify:
 ```bash
-ssh chester@172.19.176.168 'git -C axn2020-diag worktree list'
+ssh chester@172.31.230.36 'git -C project/opdiag/stark-diag worktree list'
 ```
 
 Stop if any worktree creation fails — do not spawn build agents against missing directories.
@@ -255,21 +227,19 @@ Issue all Agent tool calls in a **single response** so they launch simultaneousl
 ```
 Agent — subagent_type: fabrick, run_in_background: true
 prompt:
-  WORK_DIR=worktrees/wt1
+  WORK_DIR=project/opdiag/stark-diag/../worktrees/wt1
   CMD=bash docker.sh make all -j16
 
 Agent — subagent_type: fabrick, run_in_background: true
 prompt:
-  WORK_DIR=worktrees/wt2
+  WORK_DIR=project/opdiag/stark-diag/../worktrees/wt2
   CMD=bash docker.sh make all -j16
 
 Agent — subagent_type: fabrick, run_in_background: true
 prompt:
-  WORK_DIR=worktrees/wt3
+  WORK_DIR=project/opdiag/stark-diag/../worktrees/wt3
   CMD=bash docker.sh make all -j16
 ```
-
-To invoke this with a natural-language prompt, say: *"use the `fabrick` agent to build wt1, wt2, and wt3 in parallel in the background."*
 
 ### Step 3 — Aggregate Results (Main Agent Waits for 3 Notifications)
 
@@ -286,10 +256,10 @@ Include any failed build's log tail so the user can diagnose without connecting 
 ### Step 4 — Clean Up Worktrees (Optional)
 
 ```bash
-ssh chester@172.19.176.168 '
-  git -C axn2020-diag worktree remove ../worktrees/wt1 --force
-  git -C axn2020-diag worktree remove ../worktrees/wt2 --force
-  git -C axn2020-diag worktree remove ../worktrees/wt3 --force
+ssh chester@172.31.230.36 '
+  git -C project/opdiag/stark-diag worktree remove ../worktrees/wt1 --force
+  git -C project/opdiag/stark-diag worktree remove ../worktrees/wt2 --force
+  git -C project/opdiag/stark-diag worktree remove ../worktrees/wt3 --force
   echo "CLEANUP OK"
 '
 ```
