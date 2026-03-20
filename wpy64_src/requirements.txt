@@ -1,0 +1,8 @@
+pyserial
+pytest
+psutil
+requests
+python-dotenv
+tftpy
+opencv-python
+numpy
