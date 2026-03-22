@@ -538,3 +538,71 @@ setenv bootargs console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_interna
 2. **PoE on DIN-8T-8XE**: Exclude PoE from the test list entirely. Use a conditional approach — remove PoE from `test_functions` and `result_dic` at init time when product is `4630R-8T-8XE-DN`.
 
 3. **rc.soc**: Not needed in rootfs.overlay — it was a mistake in summit-bcma55. The build process copies it to the correct location. Skip it.
+
+---
+
+## Appendix: Claude Code Prompt Template
+
+Use this prompt to start a new Claude Code session for deriving opdiag from a new platform. Fill in the `<placeholders>` with your project details.
+
+```
+I need to derive an operational diagnostics image from a manufacturing
+diagnostics project. Follow the derivation guide step by step.
+
+Reference guide: @doc/opdiag-derivation-guide.md
+
+## Source Projects
+
+- Build server: chester@172.31.230.36:~/project/opdiag/
+- Base mfg project: <platform>-diag
+- New opdiag project: summit-<platform>  (to be created)
+- Reference opdiag to copy patterns from: <summit-bcma55 | summit-rz>
+  (bcma55 = single-board BCM/ttyS0, rz = multi-board Renesas/ttySC0)
+
+## Board Info
+
+| Board | Short Name | EEPROM Product Name | Copper Ports | Fiber/SFP Ports | Uplink | PoE | Gearbox |
+|-------|-----------|-------------------|-------------|----------------|--------|-----|---------|
+| board-0 | <name> | <product> | <ports> | <ports> | <ports> | <yes/no> | <yes/no> |
+| board-1 | <name> | <product> | <ports> | <ports> | <ports> | <yes/no> | <yes/no> |
+
+- Console port: <e.g. /dev/ttyS0, /dev/ttySC0>
+- ASIC test script: <e.g. /alpha/bcm/asic/xxx_asic_test.script>
+
+## Hardware Setup (for netboot testing)
+
+- Serial: <COM port>, <baud> baud
+- U-Boot prompt: <e.g. u-boot>, Marvell>>
+- Linux prompt: <e.g. alphadiags:/#>
+- Netboot IPs: host <x.x.x.x>, device <x.x.x.x>
+- Load address: <e.g. 0x70000000>
+- Power outlet: <outlet number>
+
+## Instructions
+
+1. SSH into the build server and create the new project:
+   cp -r <platform>-diag summit-<platform>
+2. Apply all changes from the derivation guide (Part 2, Steps 2–16)
+3. Build: bash docker.sh make all -j16
+4. Use /devloop to netboot and test — iterate until the image boots
+   cleanly and opdiag runs to completion
+5. Expected clean output after "Starting kernel ...":
+   - No kernel messages (LOGLEVEL=1)
+   - "Initializing operational diagnostics..."
+   - "Running Power On Self Test...(Normal mode)"
+   - Test results table
+   - "Diagnostics completed."
+
+Use opdiag_debug_for_internal_use in bootargs if you need to see
+hidden errors. Remove it once everything works.
+```
+
+### Checklist Before Starting
+
+- [ ] Build server SSH access works (`ssh chester@172.31.230.36`)
+- [ ] Base mfg project exists on server and builds cleanly
+- [ ] Reference opdiag project exists for copying patterns (opdiag script, 99-opdiag.sh, diagpart, pldwdtd)
+- [ ] Board EEPROM product names are known (read via `diag system eeprom show` on mfg image)
+- [ ] Port layout per board is known (check PFE TOML files in `rootfs.overlay/alpha/toml/<board>/pfe.toml`)
+- [ ] Device is connected: serial cable, Ethernet for TFTP, power PDU
+- [ ] `/devloop` skill is available for the build-test cycle
