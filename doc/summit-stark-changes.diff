@@ -1,0 +1,2151 @@
+diff --git a/buildroot-fs/configs/stark_rootfs_defconfig b/buildroot-fs/configs/stark_rootfs_defconfig
+index 80fb34345..420bace15 100755
+--- a/buildroot-fs/configs/stark_rootfs_defconfig
++++ b/buildroot-fs/configs/stark_rootfs_defconfig
+@@ -22,13 +22,6 @@ BR2_INIT_NONE=y
+ BR2_ROOTFS_MERGED_USR=y
+ BR2_PACKAGE_BUSYBOX_CONFIG="${BR2_EXTERNAL}/busybox.config"
+ BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
+-BR2_PACKAGE_GDB=y
+-BR2_PACKAGE_GDB_SERVER=y
+-BR2_PACKAGE_GDB_DEBUGGER=y
+-BR2_PACKAGE_GDB_TUI=y
+-BR2_PACKAGE_STRACE=y
+-BR2_PACKAGE_STRESS_NG=y
+-BR2_PACKAGE_VALGRIND=y
+ BR2_PACKAGE_DOSFSTOOLS=y
+ BR2_PACKAGE_DOSFSTOOLS_FATLABEL=y
+ BR2_PACKAGE_DOSFSTOOLS_FSCK_FAT=y
+diff --git a/diagnostics/diagk/cli/src/cli_init.c b/diagnostics/diagk/cli/src/cli_init.c
+index 91d4388e6..87326f855 100755
+--- a/diagnostics/diagk/cli/src/cli_init.c
++++ b/diagnostics/diagk/cli/src/cli_init.c
+@@ -163,6 +163,7 @@ CLISH_PLUGIN_INIT(mfg)
+     /* Diag commands */
+     CLI_ADD_FUNC(CLI_DIAG_Loopback_Test);
+     CLI_ADD_FUNC(CLI_DIAG_Saturate_Test);
++    CLI_ADD_FUNC(CLI_DIAG_Snake_Test);
+ 
+     /* Debug commands*/
+     CLI_ADD_FUNC(CLI_DBG_Plist_Test);
+diff --git a/diagnostics/diagk/cli/xml/diag-cmd.xml b/diagnostics/diagk/cli/xml/diag-cmd.xml
+index 32c87502c..637233a0b 100755
+--- a/diagnostics/diagk/cli/xml/diag-cmd.xml
++++ b/diagnostics/diagk/cli/xml/diag-cmd.xml
+@@ -39,6 +39,21 @@
+ 
+             <ACTION builtin="CLI_DIAG_Saturate_Test"/>
+         </COMMAND>
++    
++        <COMMAND name="diag snake_loopback" help="Execute diag snake test">
++            <PARAM name="test" help="Execute diag snake test" mode="subcommand" ptype="SUBCOMMAND">
++                <PARAM name="intf" help="Set test port range" mode="subcommand" ptype="SUBCOMMAND" optional="true">
++                    <PARAM name="intflist" help="Interfaces" ptype="INTFSELECTOR" />
++                </PARAM>
++
++                <PARAM name="duration" help="Set test time duration" mode="subcommand" ptype="SUBCOMMAND" optional="true">
++                    <PARAM name="duration_second" help="Test duration in second" ptype="UINT" default="10"/>
++                </PARAM>
++            </PARAM>
++
++            <ACTION builtin="CLI_DIAG_Snake_Test">${__full_line}</ACTION>
++        </COMMAND>
++
+     </VIEW>
+- 	<!--=======================================================-->
++
+ </CLISH_MODULE>
+diff --git a/diagnostics/diagpy/diagpy/board_init.py b/diagnostics/diagpy/diagpy/board_init.py
+index 1327704f9..250b95199 100755
+--- a/diagnostics/diagpy/diagpy/board_init.py
++++ b/diagnostics/diagpy/diagpy/board_init.py
+@@ -50,5 +50,8 @@ class Board_INFO(object):
+     def port_prefixes(self):
+         return self._board_info['port_prefixes']
+ 
++    def opdiag_toml(self):
++        return self._board_info['opdiag_toml']
++
+     def port_prefix_default(self):
+         return self._board_info['port_prefix_default']
+diff --git a/env.mk b/env.mk
+index b3411e643..405940710 100755
+--- a/env.mk
++++ b/env.mk
+@@ -7,7 +7,7 @@
+ ################################################################################
+ # Project Information
+ ################################################################################
+-export project_name = stark
++export project_name = summit-stark
+ export project_series = STARK
+ export project_version = 0.0.2-b5
+ export project_dir = $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
+diff --git a/linux-6.6.117_xldk6.3.2/arch/arm64/configs/alphadiags_defconfig b/linux-6.6.117_xldk6.3.2/arch/arm64/configs/alphadiags_defconfig
+index 896035f3c..7d9f8ee51 100644
+--- a/linux-6.6.117_xldk6.3.2/arch/arm64/configs/alphadiags_defconfig
++++ b/linux-6.6.117_xldk6.3.2/arch/arm64/configs/alphadiags_defconfig
+@@ -225,9 +225,11 @@ CONFIG_CRYPTO_AES_ARM64_CE_CCM=y
+ CONFIG_CRYPTO_DEV_IPROC_PKA=y
+ CONFIG_DMA_CMA=y
+ CONFIG_CMA_SIZE_MBYTES=32
+-CONFIG_PRINTK_TIME=y
++# CONFIG_PRINTK_TIME is not set
+ CONFIG_FRAME_WARN=1024
+-CONFIG_MAGIC_SYSRQ=y
++# CONFIG_MAGIC_SYSRQ is not set
++CONFIG_CONSOLE_LOGLEVEL_DEFAULT=1
++CONFIG_CONSOLE_LOGLEVEL_QUIET=1
+ CONFIG_DEBUG_FS=y
+ CONFIG_RCU_CPU_STALL_TIMEOUT=60
+ # CONFIG_STRICT_DEVMEM is not set
+diff --git a/rootfs.overlay/alpha/script/quickstart_din-8t-8xe b/rootfs.overlay/alpha/script/quickstart_din-8t-8xe
+index 8b0890b3f..9bbf8380a 100755
+--- a/rootfs.overlay/alpha/script/quickstart_din-8t-8xe
++++ b/rootfs.overlay/alpha/script/quickstart_din-8t-8xe
+@@ -18,14 +18,15 @@ bcmcmd "*: port e tpau=0 rpau=0"
+ ! Remove CPU from VLAN 1. due to the diagK VLAN command not support CPU port.
+ bcmcmd "*: vlan remove 1 pbm=cpu"
+ 
++! Delete all ports from VLAN ID 1.
++config vlan member delete 1 all
++
++! Set all ports to MAC loopback mode.
++config interface loopback all mac
++
+ ! Enable all front ports.
+ config interface startup all
+ 
+-! Apply the default SerDes settings.
+-! TBD
+-! config interface txfir @fp17/1,@fp18/1,@u1/1,@u2/1 default
+-! config gearbox txfir @fp17/1,@fp18/1 default
+-
+ ! ------------------------------------------------
+ ! End of Quickstart script
+ ! ------------------------------------------------
+\ No newline at end of file
+diff --git a/rootfs.overlay/alpha/script/quickstart_din-8w-4x b/rootfs.overlay/alpha/script/quickstart_din-8w-4x
+index 8b0890b3f..9bbf8380a 100755
+--- a/rootfs.overlay/alpha/script/quickstart_din-8w-4x
++++ b/rootfs.overlay/alpha/script/quickstart_din-8w-4x
+@@ -18,14 +18,15 @@ bcmcmd "*: port e tpau=0 rpau=0"
+ ! Remove CPU from VLAN 1. due to the diagK VLAN command not support CPU port.
+ bcmcmd "*: vlan remove 1 pbm=cpu"
+ 
++! Delete all ports from VLAN ID 1.
++config vlan member delete 1 all
++
++! Set all ports to MAC loopback mode.
++config interface loopback all mac
++
+ ! Enable all front ports.
+ config interface startup all
+ 
+-! Apply the default SerDes settings.
+-! TBD
+-! config interface txfir @fp17/1,@fp18/1,@u1/1,@u2/1 default
+-! config gearbox txfir @fp17/1,@fp18/1 default
+-
+ ! ------------------------------------------------
+ ! End of Quickstart script
+ ! ------------------------------------------------
+\ No newline at end of file
+diff --git a/rootfs.overlay/alpha/script/quickstart_rm-24w-8xe b/rootfs.overlay/alpha/script/quickstart_rm-24w-8xe
+index a010cf94f..9bbf8380a 100755
+--- a/rootfs.overlay/alpha/script/quickstart_rm-24w-8xe
++++ b/rootfs.overlay/alpha/script/quickstart_rm-24w-8xe
+@@ -18,14 +18,15 @@ bcmcmd "*: port e tpau=0 rpau=0"
+ ! Remove CPU from VLAN 1. due to the diagK VLAN command not support CPU port.
+ bcmcmd "*: vlan remove 1 pbm=cpu"
+ 
++! Delete all ports from VLAN ID 1.
++config vlan member delete 1 all
++
++! Set all ports to MAC loopback mode.
++config interface loopback all mac
++
+ ! Enable all front ports.
+ config interface startup all
+ 
+-! Apply the default SerDes settings.
+-! Not ready for RM-24W-8XE.
+-! config interface txfir @fp17/1,@fp18/1,@u1/1,@u2/1 default
+-! config gearbox txfir @fp17/1,@fp18/1 default
+-
+ ! ------------------------------------------------
+ ! End of Quickstart script
+ ! ------------------------------------------------
+\ No newline at end of file
+diff --git a/rootfs.overlay/alpha/script/quickstart_rm-4mw-12w-4xe b/rootfs.overlay/alpha/script/quickstart_rm-4mw-12w-4xe
+index 10569f4bd..74b1b8c45 100755
+--- a/rootfs.overlay/alpha/script/quickstart_rm-4mw-12w-4xe
++++ b/rootfs.overlay/alpha/script/quickstart_rm-4mw-12w-4xe
+@@ -23,14 +23,15 @@ bcmcmd "*: vlan remove 1 pbm=cpu"
+ ! Set 2.5G overXFI to fp13 and fp16.
+ config interface overxfi 13-16 mode 10g_to_2p5g
+ 
++! Delete all ports from VLAN ID 1.
++config vlan member delete 1 all
++
++! Set all ports to MAC loopback mode.
++config interface loopback all mac
++
+ ! Enable all front ports.
+ config interface startup all
+ 
+-! Apply the default SerDes settings.
+-! TBD
+-! config interface txfir @fp17/1,@fp18/1,@u1/1,@u2/1 default
+-! config gearbox txfir @fp17/1,@fp18/1 default
+-
+ ! ------------------------------------------------
+ ! End of Quickstart script
+ ! ------------------------------------------------
+\ No newline at end of file
+diff --git a/rootfs.overlay/alpha/toml/board.toml b/rootfs.overlay/alpha/toml/board.toml
+index 8abd4204b..4eb3cdde0 100755
+--- a/rootfs.overlay/alpha/toml/board.toml
++++ b/rootfs.overlay/alpha/toml/board.toml
+@@ -15,6 +15,7 @@ pfe_toml = "/alpha/toml/din-8w-4x/pfe.toml"
+ i2c_toml = "/alpha/toml/din-8w-4x/i2c.toml"
+ xcvr_toml = "/alpha/toml/din-8w-4x/xcvr.toml"
+ poe_toml = "/alpha/toml/din-8w-4x/poe.toml"
++opdiag_toml = "/alpha/toml/opdiag.toml"
+ description = "Stark 4630R-8W-4X-DN Switch"
+ 
+ [board-1]
+@@ -26,6 +27,7 @@ quickstart = "/alpha/script/quickstart_din-8t-8xe"
+ pfe_toml = "/alpha/toml/din-8t-8xe/pfe.toml"
+ i2c_toml = "/alpha/toml/din-8t-8xe/i2c.toml"
+ xcvr_toml = "/alpha/toml/din-8t-8xe/xcvr.toml"
++opdiag_toml = "/alpha/toml/opdiag.toml"
+ description = "Stark 4630R-8T-8XE-DN Switch"
+ 
+ [board-2]
+@@ -38,6 +40,7 @@ pfe_toml = "/alpha/toml/rm-24w-8xe/pfe.toml"
+ i2c_toml = "/alpha/toml/rm-24w-8xe/i2c.toml"
+ xcvr_toml = "/alpha/toml/rm-24w-8xe/xcvr.toml"
+ poe_toml = "/alpha/toml/rm-24w-8xe/poe.toml"
++opdiag_toml = "/alpha/toml/opdiag.toml"
+ description = "Stark 4630R-24W-8XE-RM Switch"
+ 
+ [board-3]
+@@ -51,4 +54,5 @@ gearbox_toml = "/alpha/toml/rm-4mw-12w-4xe/gearbox.toml"
+ i2c_toml = "/alpha/toml/rm-4mw-12w-4xe/i2c.toml"
+ xcvr_toml = "/alpha/toml/rm-4mw-12w-4xe/xcvr.toml"
+ poe_toml = "/alpha/toml/rm-4mw-12w-4xe/poe.toml"
++opdiag_toml = "/alpha/toml/opdiag.toml"
+ description = "Stark 4630R-4MW-12W-4XE-RM Switch"
+\ No newline at end of file
+diff --git a/rootfs.overlay/alpha/whl/iniconfig-2.3.0-py3-none-any.whl b/rootfs.overlay/alpha/whl/iniconfig-2.3.0-py3-none-any.whl
+deleted file mode 100644
+index f8cd4b9e7..000000000
+Binary files a/rootfs.overlay/alpha/whl/iniconfig-2.3.0-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/packaging-26.0-py3-none-any.whl b/rootfs.overlay/alpha/whl/packaging-26.0-py3-none-any.whl
+deleted file mode 100644
+index 2638a259b..000000000
+Binary files a/rootfs.overlay/alpha/whl/packaging-26.0-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/pluggy-1.6.0-py3-none-any.whl b/rootfs.overlay/alpha/whl/pluggy-1.6.0-py3-none-any.whl
+deleted file mode 100644
+index 1f7e6268d..000000000
+Binary files a/rootfs.overlay/alpha/whl/pluggy-1.6.0-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/plumbum-1.10.0-py3-none-any.whl b/rootfs.overlay/alpha/whl/plumbum-1.10.0-py3-none-any.whl
+deleted file mode 100644
+index 50861c8d7..000000000
+Binary files a/rootfs.overlay/alpha/whl/plumbum-1.10.0-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/pygments-2.19.2-py3-none-any.whl b/rootfs.overlay/alpha/whl/pygments-2.19.2-py3-none-any.whl
+deleted file mode 100644
+index 3ec3f105e..000000000
+Binary files a/rootfs.overlay/alpha/whl/pygments-2.19.2-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/pytest-9.0.2-py3-none-any.whl b/rootfs.overlay/alpha/whl/pytest-9.0.2-py3-none-any.whl
+deleted file mode 100644
+index f7bbe541d..000000000
+Binary files a/rootfs.overlay/alpha/whl/pytest-9.0.2-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/pytest_loop-1.0.13-py3-none-any.whl b/rootfs.overlay/alpha/whl/pytest_loop-1.0.13-py3-none-any.whl
+deleted file mode 100644
+index 71ddead4e..000000000
+Binary files a/rootfs.overlay/alpha/whl/pytest_loop-1.0.13-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/pytest_ordering-0.6-py3-none-any.whl b/rootfs.overlay/alpha/whl/pytest_ordering-0.6-py3-none-any.whl
+deleted file mode 100755
+index 710ad85d3..000000000
+Binary files a/rootfs.overlay/alpha/whl/pytest_ordering-0.6-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/requirements.txt b/rootfs.overlay/alpha/whl/requirements.txt
+index 75896f501..6c65133d3 100644
+--- a/rootfs.overlay/alpha/whl/requirements.txt
++++ b/rootfs.overlay/alpha/whl/requirements.txt
+@@ -1,6 +1,3 @@
+ diagpy
+-pytest
+-pytest-loop
+ pyserial
+ pexpect
+-rpyc
+diff --git a/rootfs.overlay/alpha/whl/rpyc-6.0.2-py3-none-any.whl b/rootfs.overlay/alpha/whl/rpyc-6.0.2-py3-none-any.whl
+deleted file mode 100644
+index 4079af1dc..000000000
+Binary files a/rootfs.overlay/alpha/whl/rpyc-6.0.2-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/alpha/whl/tomli-2.4.0-py3-none-any.whl b/rootfs.overlay/alpha/whl/tomli-2.4.0-py3-none-any.whl
+deleted file mode 100644
+index d75ffb9ea..000000000
+Binary files a/rootfs.overlay/alpha/whl/tomli-2.4.0-py3-none-any.whl and /dev/null differ
+diff --git a/rootfs.overlay/etc/init.d/S80mount b/rootfs.overlay/etc/init.d/S80mount
+deleted file mode 100755
+index 950cc3164..000000000
+--- a/rootfs.overlay/etc/init.d/S80mount
++++ /dev/null
+@@ -1,25 +0,0 @@
+-#!/bin/sh
+-# Alphanetworks Inc. 2012
+-# Scan devices
+-#
+-
+-start() {
+- 	echo "Scanning devices..."
+-	/sbin/mdev -s
+-}	
+-
+-case "$1" in
+-  start)
+-  	start
+-	;;
+-  stop)
+-	;;
+-  restart|reload)
+-	;;
+-  *)
+-	echo $"Usage: $0 {start}"
+-	exit 1
+-esac
+-
+-exit $?
+-
+diff --git a/rootfs.overlay/etc/init.d/S91diagenv b/rootfs.overlay/etc/init.d/S91diagenv
+deleted file mode 100755
+index 199a0cb84..000000000
+--- a/rootfs.overlay/etc/init.d/S91diagenv
++++ /dev/null
+@@ -1,110 +0,0 @@
+-#!/bin/sh
+-
+-#
+-# Alphanetworks Inc.
+-#
+-
+-set -o nounset
+-# Uncomment for debug/development.
+-#set -o xtrace
+-
+-search_path="/alpha/mnt/usb/diagenv /alpha/mnt/ssd/diagenv"
+-envfile=
+-
+-# NOTE: Below variables might be overrided later.
+-tag=
+-mgmt_if=
+-mgmt_ip=
+-mgmt_prefix=
+-mgmt_gateway=
+-mgmt_mac=
+-ssh_enable=
+-
+-log()
+-{
+-    printf ":: $@\n"
+-}
+-
+-start()
+-{
+-    if grep -q skip_diagenv /proc/cmdline; then
+-        log "skip_diagenv detected, ignore diagenv."
+-        return 0
+-    fi
+-
+-    for script in ${search_path}; do
+-        # Only executable will be executed.
+-        if [ -x ${script} ]; then
+-            envfile=${script}
+-            break
+-        fi
+-    done
+-
+-    if [ -z "${envfile}" ]; then
+-        return 1
+-    fi
+-
+-    log "${envfile} is detected."
+-    source ${envfile}
+-
+-    if [ ! -z "${tag}" ]; then
+-        log "Setup hostname: ${tag}"
+-        hostname "${tag}"
+-    fi
+-
+-    if [ -x "/sys/class/net/${mgmt_if}" ]; then
+-        log "Disable ${mgmt_if}"
+-        ip link set down dev ${mgmt_if}
+-
+-        if [ ! -z "${mgmt_mac}" ]; then
+-            mgmt_mac=${mgmt_mac//-/:}
+-            log "Setup ${mgmt_if} MAC address: ${mgmt_mac}"
+-            ip link set address ${mgmt_mac} dev ${mgmt_if}
+-        fi
+-
+-        if [ ! -z "${mgmt_ip}" ]; then
+-            if [ -z "${mgmt_prefix}" ]; then
+-                mgmt_prefix=$(ipcalc -p ${mgmt_ip} | sed 's/^PREFIX=//')
+-                if [ $? -ne 0 ]; then
+-                    log "Invalid mgmt_prefix(${mgmt_prefix}), fallback to 24"
+-                    mgmt_prefix=24
+-                fi
+-            fi
+-            ip addr flush dev ${mgmt_if}
+-            log "Setup ${mgmt_if} with address ${mgmt_ip}/${mgmt_prefix}"
+-            ip addr add ${mgmt_ip}/${mgmt_prefix} dev ${mgmt_if}
+-        fi
+-
+-        log "Enable ${mgmt_if}"
+-        ip link set up dev ${mgmt_if}
+-
+-        if [ ! -z "${mgmt_gateway}" ]; then
+-            log "Setup ${mgmt_if} with default gateway ${mgmt_gateway}"
+-            ip route replace default via ${mgmt_gateway} dev ${mgmt_if}
+-        fi
+-    else
+-        log "${mgmt_if} is unavailable, ignore."
+-    fi
+-
+-    if [ ! -z "${ssh_enable}" ]; then
+-        log "Enable SSH server"
+-        mkdir -p /var/run/dropbear
+-        dropbear -B -R -b /etc/banner
+-    fi
+-}
+-
+-case "$1" in
+-    start)
+-        start
+-        ;;
+-    stop)
+-        ;;
+-    restart|reload)
+-        ;;
+-    *)
+-        echo $"Usage: $0 {start}"
+-        exit 1
+-esac
+-
+-exit $?
+-
+diff --git a/rootfs.overlay/etc/init.d/S99diagps b/rootfs.overlay/etc/init.d/S99diagps
+deleted file mode 100755
+index c9ffab2fd..000000000
+--- a/rootfs.overlay/etc/init.d/S99diagps
++++ /dev/null
+@@ -1,54 +0,0 @@
+-#!/bin/sh
+-
+-#
+-# Alpha Networks, Inc.
+-#
+-
+-set -o nounset
+-# Uncomment for debug/development.
+-#set -o xtrace
+-
+-script_name=$(basename $0)
+-# `search_path` is a space-separated list for the files to be detected.
+-search_path="/alpha/mnt/usb/diagps /alpha/mnt/ssd/diagps"
+-log_file="/tmp/${script_name}.log"
+-runscript=
+-
+-log()
+-{
+-    printf "[%13s] ${script_name}: $@\n" \
+-            "$(cat /proc/uptime | cut -f1 -d' ')" >> ${log_file}
+-    printf ":: $@\n"
+-}
+-
+-start()
+-{
+-    for script in ${search_path}; do
+-        # Only executable will be executed.
+-        if [ -x ${script} ]; then
+-            runscript=${script}
+-            break
+-        fi
+-    done
+-
+-    if [ ! -z "${runscript}" ]; then
+-        log "${runscript} is detected, running it."
+-        ${runscript}; ret=$?
+-        log "End of ${runscript}, returns ${ret}"
+-    else
+-        log "No DIAGPS is detected."
+-    fi
+-}
+-
+-case "$1" in
+-    start)
+-        start
+-        ;;
+-    stop)
+-        ;;
+-    restart|reload)
+-        ;;
+-    *)
+-        echo $"Usage: $0 {start}"
+-        exit 1
+-esac
+diff --git a/rootfs.overlay/etc/profile.d/prompt.sh b/rootfs.overlay/etc/profile.d/prompt.sh
+index ac9847b7e..1ace87ec1 100755
+--- a/rootfs.overlay/etc/profile.d/prompt.sh
++++ b/rootfs.overlay/etc/profile.d/prompt.sh
+@@ -1,7 +1,8 @@
+ #!/bin/sh
+ 
+ export PS1='\h:\w# '
++export KLISH=${KLISH:-}
+ 
+-if [ ! -z $KLISH ]; then
++if [ -n "$KLISH" ]; then
+     export PS1="(KLISH) ${PS1}"
+ fi
+diff --git a/rootfs.overlay/init b/rootfs.overlay/init
+index b631b9d01..6b81ca9d0 100755
+--- a/rootfs.overlay/init
++++ b/rootfs.overlay/init
+@@ -2,6 +2,46 @@
+ 
+ # Alphanetworks, Inc.
+ 
++prep_opdiag()
++{
++    local backup="$@"
++    local OPDDIAG_DEV=
++
++    set -- $(cat /proc/cmdline)
++    for x in "$@"; do
++        case "$x" in
++            # Development/Debug option
++            opdiag_debug_for_internal_use)
++                local OPDIAG_DEV=1
++                ;;
++            # # Comment - Only for internal debug use.
++            # opdiag_linuxsh|opdiag_stop_if_fail|opdiag_no_reboot)
++            #     local OPDIAG_DEV=1
++            #     ;;
++            *)
++                ;;
++        esac
++    done
++
++    # restore
++    set -- ${backup}
++
++    if [ -n "${OPDIAG_DEV}" ]; then
++        stty -F /dev/ttyS0 115200
++        exec </dev/ttyS0
++        exec >/dev/ttyS0
++        exec 2>/dev/ttyS0
++        reset
++        # Reset printk level
++        echo 7 4 1 7 > /proc/sys/kernel/printk
++    else
++        exec </dev/null
++        exec >/dev/null
++        exec 2>/dev/null
++        echo N > /sys/class/tty/ttyS0/console
++    fi
++}
++
+ # Mount basic filesystem.
+ /bin/mount -t proc none /proc
+ /bin/mount -t sysfs none /sys
+@@ -18,11 +58,7 @@ mkdir -p /var/lock
+ # hostname
+ /bin/hostname -F /etc/hostname
+ 
+-# Register mdev as the hotplug handler
+-echo "/sbin/mdev" > /proc/sys/kernel/hotplug
+-
+-# Setup coredump
+-/alpha/bin/alphach --register
++# For Operational Diagnostics
++prep_opdiag
+ 
+ exec /sbin/init "$@"
+-
+--- /dev/null
++++ b/diagnostics/diagpy/diagpy/board_init.py.bak
+@@ -0,0 +1,54 @@
++import toml
++
++def _get_key(dict, val):
++    for key, value in dict.items():
++        if val == value:
++            return key
++
++class Board_INFO(object):
++    def __init__(self):
++        # Get all boards information.
++        self._board_toml = '/alpha/toml/board.toml'
++        self._boards_info = toml.load(self._board_toml)
++
++        # Get board ID.
++        with open('/tmp/board_id', 'r') as f:
++            content = f.readline()
++            board_id_str = content.replace('\n', '')    # content is "0xAA\n".
++        self._board_id = int(board_id_str, 0)
++
++        # Get board information by the board ID.
++        self._board_info = self._board_table(self._board_id)
++
++    def _board_table(self, id):
++        board_info = {}
++        for value in self._boards_info.values():
++            if _get_key(value, id) == 'board_id':
++                board_info = value
++                return board_info
++
++        # Check if the board ID is valid.
++        if not board_info:
++            error = 'Invalid board ID 0x{:02X}'.format(id)
++            raise Exception(error)
++
++    def board_id(self):
++        return self._board_id
++
++    def i2c_toml(self):
++        return self._board_info['i2c_toml']
++
++    def fan_toml(self):
++        return self._board_info['fan_toml']
++
++    def xcvr_toml(self):
++        return self._board_info['xcvr_toml']
++
++    def poe_toml(self):
++        return self._board_info['poe_toml']
++
++    def port_prefixes(self):
++        return self._board_info['port_prefixes']
++
++    def port_prefix_default(self):
++        return self._board_info['port_prefix_default']
+--- /dev/null
++++ b/rootfs.overlay/alpha/bin/diagpart
+@@ -0,0 +1,121 @@
++#!/bin/sh
++
++# This script is designed for Fjord project to handle the diagnostics partition (/diagpart).
++# /diagpart will be used for "internal flash" test and log storage.
++
++set -o nounset
++# Uncomment to debug this script
++#set -o xtrace
++
++diagpart()
++{
++    set -- $(cat /proc/cmdline)
++    for x in "$@"; do
++        case "$x" in
++            diagnostics_partition=*)
++                local part="${x#diagnostics_partition=}"
++
++                # check if mountable
++                if [ -z "`blkid -s TYPE ${part}`" ]; then
++                    return 1
++                fi
++
++                echo "${part}"
++                return 0
++                ;;
++            *)
++                ;;
++        esac
++    done
++
++    return -1
++}
++
++# Try to (re)mount /diagpart
++mount_diagpart()
++{
++    local part="`diagpart`"
++
++    # Not available
++    if [ -z "${part}" ]; then
++        echo "diagnostics_partition is not available, skipped"
++        return 1
++    fi
++
++    umount_diagpart
++
++    if grep -q /diagpart /proc/self/mounts; then
++        echo "/diagpart is not clear, skipped"
++        return 1
++    fi
++    mkdir -p /diagpart
++    mount -o sync ${part} /diagpart
++
++    return 0
++}
++
++# Try to umount /diagpart or diagnostics_partition
++umount_diagpart()
++{
++    local part="`diagpart`"
++
++    if [ ! -z "${part}" ]; then
++        while grep -q ${part} /proc/self/mounts; do
++            umount ${part}
++        done
++    fi
++
++    if [ -d /diagpart ]; then
++        while grep -q /diagpart /proc/self/mounts; do
++            umount /diagpart
++        done
++
++        rm -r /diagpart
++    fi
++}
++
++usage()
++{
++    echo "usage: $(basename $0) [mount|umount|check|part]"
++}
++
++################
++# Main section #
++################
++
++if [ ! $# -eq 1 ]; then
++    usage
++    exit 0
++fi
++
++case "$1" in
++    mount)
++        mount_diagpart
++        exit $?
++        ;;
++    umount)
++        umount_diagpart
++        exit $?
++        ;;
++    check)
++        part="`diagpart`"
++        if [ -z "${part}" ]; then
++            echo "diagnostics_partition is not specified or not mountable"
++            exit 1
++        fi
++
++        mountcount=`grep /diagpart /proc/self/mounts | wc -l`
++        if [ ${mountcount} -eq 1 ] && grep -q ${part} /proc/self/mounts; then
++            echo "/diagpart is mounted correctly"
++        elif [ ${mountcount} -eq 0 ]; then
++            echo "/diagpart is not mounted"
++        elif [ ${mountcount} -gt 1 ]; then
++            echo "/diagpart is mounted by multiple partitions"
++        fi
++        ;;
++    part)
++        echo `diagpart`
++        ;;
++    *)
++        usage
++        ;;
++esac--- /dev/null
++++ b/rootfs.overlay/alpha/bin/opdiag
+@@ -0,0 +1,971 @@
++#!/usr/bin/env python3
++
++# Import third-party package.
++import os
++import re
++import sys
++import time
++import toml
++import shutil
++import pexpect
++import argparse
++import subprocess
++from functools import wraps
++from datetime import datetime
++# Import diagpy module.
++from diagpy.board_init import *
++
++PASS = 'PASS'
++FAIL = 'FAIL'
++TIMEOUT = 'TIMEOUT'
++
++def cli_parser():
++    # Create the top-level parser.
++    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
++
++    parser.add_argument(
++        '--mode',
++        help='support normal mode and extended mode.',
++        type=str,
++        required=True
++    )
++
++    parser.add_argument(
++        '--release-version',
++        help='release version of image.',
++        type=str,
++        required=True
++    )
++
++    parser.add_argument(
++        '--release-date',
++        help='release date of image.',
++        type=str,
++        required=True
++    )
++
++    # Development argument
++    parser.add_argument(
++        '--verbose',
++        help='display system stdout.',
++        action='store_true'
++    )
++
++    # Development argument
++    parser.add_argument(
++        '--stop-if-fail',
++        help='if the test fails, it will immediately stop at the current prompt.',
++        action='store_true'
++    )
++
++    # Development argument
++    parser.add_argument(
++        '--no-exit',
++        help='if the end of test, it will immediately stop at the current prompt.',
++        action='store_true'
++    )
++
++    return parser
++
++class OpdiagHelper():
++    def __init__(self, mode, verbose, stop_if_fail, no_exit):
++        # Initialize parameters
++        self.mode = mode
++        self.verbose = verbose
++        self.stop_if_fail = stop_if_fail
++        self.no_exit = no_exit
++        self.mac_init = False
++        self.gearbox_init = False
++        self.is_linux_prompt = False
++        self.item_name = ''
++        self.check_dic = dict()
++
++        # Load Toml.
++        self.opdiag_toml = toml.load(Board_INFO().opdiag_toml())['opdiag']
++        self.linux_prompt = re.compile(self.opdiag_toml['linux_prompt']).pattern
++        self.cli_prompt = re.compile(self.opdiag_toml['cli_prompt']).pattern
++        self.verbose_log_path_from_toml = self.opdiag_toml.get('verbose_log_path')
++        self.flow_log_path_from_toml = self.opdiag_toml.get('flow_log_path')
++
++        # Cli
++        try:
++            self.child = pexpect.spawn(
++                '/alpha/bin/cli', logfile=open(self.verbose_log_path_from_toml, 'wb')
++            )
++        except pexpect.exceptions.ExceptionPexpect as err_msg:
++            if self.verbose:
++                print(f'****{"*"*len(str(err_msg))}****')
++                print(f'*** {err_msg} ***')
++                print(f'****{"*"*len(str(err_msg))}****')
++            sys.exit(1)
++        except FileNotFoundError:
++            if self.verbose:
++                print('***********************************************************')
++                print('*** The provided path for the verbose log is incorrect. ***')
++                print('***********************************************************')
++        self.child.expect([self.cli_prompt, pexpect.TIMEOUT], timeout=10)
++
++        # Test item functions.
++        self.test_functions = {
++            'i2c environment': self.i2c_environment,
++            'internal flash': self.internal_flash,
++            'memory': self.memory,
++            'loopback mac interface': self.loopback_mac_interface,
++            'loopback phy copper': self.loopback_phy_copper,
++            'loopback phy fiber': self.loopback_phy_fiber,
++            'snake interface': self.snake_interface,
++            'PoE': self.poe,
++            'asic0 reg': self.asic0_reg,
++            'asic0 mem': self.asic0_mem
++        }
++
++        # Test results
++        self.result_dic = {
++            'i2c environment': 'N/A',
++            'internal flash': 'N/A',
++            'memory': 'N/A',
++            'loopback mac interface': 'N/A',
++            'loopback phy copper': 'N/A',
++            'loopback phy fiber': 'N/A',
++            'snake interface': 'N/A',
++            'PoE': 'N/A',
++            'asic0 reg': 'N/A',
++            'asic0 mem': 'N/A'
++        }
++
++    def pexpect_output(self, position):
++        try:
++            if position == 'after':
++                return self.child.after.decode('utf-8')
++            elif position == 'before':
++                return self.child.before.decode('utf-8')
++            else:
++                raise ValueError('position must be either "before" or "after"')
++        except AttributeError as err_msg:
++            if TIMEOUT in str(err_msg):
++                return '"TIMEOUT" due to not waiting for the expected output.'
++            return err_msg
++
++    def save_results(self, command, e_res, a_res, e_time):
++        if command and command[0] == '!': return
++        result = 'Success' if re.match(e_res, a_res) else 'Failure'
++        flow_log_path = self.flow_log_path_from_toml.format(item_name=self.item_name)
++        with open(flow_log_path, 'a+') as log:
++            content = log.readlines()
++            if command in content:
++                log.write(f'[{result}] retry {command} (Execution Time: {round(e_time, 3)}s)\n')
++            else:
++                log.write(f'[{result}] {command} (Execution Time: {round(e_time, 3)}s)\n')
++            log.write(f'    expected: {e_res}\n')
++            log.write(f'    actual:   {a_res}\n')
++
++    def send_command(self, command, pass_pattern=None, fail_pattern=None, timeout=10):
++        s_time = time.time()
++        if command == 'sh':
++            self.is_linux_prompt = True
++        elif command == 'exit':
++            self.is_linux_prompt = False
++        previous_logfile = self.child.logfile
++        self.child.logfile = None
++        self.child.sendline(command)
++        self.child.logfile = previous_logfile
++        pattern_list = []
++        if pass_pattern is None or pass_pattern == self.cli_prompt:
++            index = self.child.expect([self.cli_prompt, pexpect.TIMEOUT], timeout=timeout)
++            e_time = time.time() - s_time
++            self.save_results(command, self.cli_prompt, self.pexpect_output('after'), e_time)
++
++            return TIMEOUT if index != 0 else PASS
++        if pass_pattern == self.linux_prompt:
++            index = self.child.expect([self.linux_prompt, pexpect.TIMEOUT], timeout=timeout)
++            e_time = time.time() - s_time
++            self.save_results(command, self.linux_prompt, self.pexpect_output('after'), e_time)
++
++            return TIMEOUT if index != 0 else PASS
++
++        pattern_list = []
++        if type(fail_pattern) is str:
++            pattern_list.append(fail_pattern)
++        elif type(fail_pattern) is list:
++            for fail_pattern in fail_pattern:
++                pattern_list.append(fail_pattern)
++        pattern_list.append(pexpect.TIMEOUT)
++
++        pass_index = len(pattern_list)
++        timeout_index = pass_index - 1
++        if type(pass_pattern) is str:
++            pattern_list.append(pass_pattern)
++            index = self.child.expect(pattern_list, timeout=timeout)
++            if index == timeout_index:
++                result = TIMEOUT
++            elif index >= pass_index:
++                result = PASS
++            else:
++                result = FAIL
++            e_time = time.time() - s_time
++            self.save_results(command, pass_pattern, self.pexpect_output('after'), e_time)
++        elif type(pass_pattern) is list:
++            for pass_pattern in pass_pattern:
++                pattern_list.append(pass_pattern)
++            index = self.child.expect(pattern_list, timeout=timeout)
++            if index == timeout_index:
++                result = TIMEOUT
++            elif index >= pass_index:
++                result = PASS
++            else:
++                result = FAIL
++            e_time = time.time() - s_time
++            self.save_results(command, pass_pattern, self.pexpect_output('after'), e_time)
++
++        if not self.is_linux_prompt:
++            self.child.expect([self.cli_prompt, pexpect.TIMEOUT], timeout=timeout)
++        else:
++            self.child.expect([self.linux_prompt, pexpect.TIMEOUT], timeout=timeout)
++
++        return result
++
++    def dut_init(self):
++        '''
++        - DUT Init
++            quickstart
++            show interface status
++            show gearbox interface status
++        '''
++
++        init_error_pattern = r'\[\w+ \(\w+\.\w+:\d+\)\] Error: .+\n'
++        self.send_command('quickstart', 'End of Quickstart script', timeout=90)
++        self.child.expect('! ------------------------------------------------')
++        self.child.expect(self.cli_prompt)
++
++        # Check MAC Init Status
++        self.send_command('show interface status', self.cli_prompt)
++        mac_init_result = self.pexpect_output('before')
++        mac_init_fail = re.findall(init_error_pattern, mac_init_result)
++
++        # Init is finished
++        if not mac_init_fail:
++            self.mac_init = True
++
++        # Check Gearbox Init Status (only for boards with gearbox hardware)
++        if 'gearbox_toml' in Board_INFO()._board_info:
++            self.send_command('show gearbox interface status', self.cli_prompt)
++            gearbox_init_result = self.pexpect_output('before')
++            gearbox_init_fail = re.findall(init_error_pattern, gearbox_init_result)
++            if not gearbox_init_fail:
++                self.gearbox_init = True
++        else:
++            self.gearbox_init = True  # No gearbox on this board
++        if (not self.mac_init or not self.gearbox_init) and self.stop_if_fail:
++            self.interact()
++
++    def interact(self):
++        print('Raise the debug interactive session. Use "enter" to activate it and "ctrl-]" to return it')
++        if self.verbose:
++            self.child.logfile_read = None
++            self.child.interact()
++            self.child.logfile_read = sys.stdout.buffer
++        else:
++            self.child.interact()
++        print('Session is returned, continue...')
++
++    def check_system_eeprom(self):
++        '''
++        - read system EEPROM
++            sys_eeprom onie --name product_name
++            sys_eeprom onie --name part_number
++            sys_eeprom onie --name serial_number
++        '''
++        # Read product name.
++        self.product_name = subprocess.check_output('sys_eeprom onie --name product_name'.split(), text=True).rstrip()
++
++        # Read part number.
++        self.part_number = subprocess.check_output('sys_eeprom onie --name part_number'.split(), text=True).rstrip()
++
++        # Read serial number.
++        self.serial_number = subprocess.check_output('sys_eeprom onie --name serial_number'.split(), text=True).rstrip()
++
++    def save_log(self, log):
++        # Set system datetime according to RTC time.
++        rtc_get = subprocess.check_output('rtc --get'.split(), text=True)
++        pattern = r'(?P<year>\d+)\/(?P<month>\d+)\/(?P<day>\d+)\s+\w+\s+(?P<time>\d+:\d+:\d+)'
++        match_datetime = re.findall(pattern, rtc_get)
++        for match_year, match_month, match_day, match_time in match_datetime:
++            rtc_datetime = f'{match_year}-{match_month}-{match_day} {match_time}'
++        subprocess.run(['date', '-s', rtc_datetime], stdout=subprocess.PIPE)
++
++        # Read system datetime.
++        current_time = datetime.now().strftime("%b-%d-%Y %H:%M:%S")
++
++        # Write system datetime.
++        log.write(f'Date: {current_time}\n')
++
++        # Write release version of image.
++        log.write(f'Version: {release_version}\n')
++
++        # Check result of test items.
++        for item in self.opdiag_toml['test_items']:
++            if item['name'] not in self.result_dic:
++                continue
++            # If there is a FAIL result in any of the test items, then the Summary result is FAIL.
++            if self.result_dic[item['name']] == FAIL:
++                summary = 'Summary: Diagnostics Fail\n'
++                break
++            else:
++                summary = 'Summary: Diagnostics Pass\n'
++        log.write(summary)
++
++        # Mode type: Normal and Extended.
++        # Write the mode type, and set the first letter of the mode to uppercase.
++        log.write(f'Mode: {mode.capitalize()}\n')
++        log.write('\n')
++
++        # Transfer product name and write system EEPROM.
++        trans_product_name = self.trans_product_name()
++        if trans_product_name is None:
++            log.write('\n')
++        else:
++            log.write(f'{trans_product_name}{":":<12s} {self.part_number} {self.serial_number}\n')
++
++        # Write title
++        log.write('\n')
++        log.write(f'{"Test":<28s} Result\n')
++        log.write(f'{"="*35}\n')
++
++        # Write test items and test results.
++        for item in self.opdiag_toml['test_items']:
++            if item['name'] not in self.result_dic:
++                continue
++            if self.result_dic[item['name']] == 'N/A':
++                self.result_dic[item['name']] = FAIL
++            log.write(f'{item["name"]:<28s} ')
++            log.write(f'{self.result_dic[item["name"]]}\n')
++
++        if self.verbose:
++            print('')
++            print('**********************************')
++            print('*** DEVELOPMENT MODE, SHOW LOG ***')
++            print('**********************************')
++            # Return the pointer to the beginning of the document.
++            log.seek(0)
++            print(log.read())
++            # Pause for 10 seconds to allow developers to review the log displayed.
++            time.sleep(10)
++
++    def rename_files(self, folder):
++        if folder.startswith('/'):
++            diagpart_path = folder
++        else:
++            diagpart_path = f'/{folder}'
++
++        tmp_path = f'/tmp{folder}'
++        os.makedirs(tmp_path, exist_ok=True)
++        filelist = []
++        for f_name in os.listdir(diagpart_path):
++            if re.match(r'operational-results-[0-9].txt', f_name):
++                filelist.append(f_name)
++                shutil.copy(f'{diagpart_path}/{f_name}', f'{tmp_path}/{f_name}')
++                os.remove(f'{diagpart_path}/{f_name}')
++        filelist = sorted(filelist)
++
++        if len(filelist) > 9:
++            for i in range(9, len(filelist)):
++                del filelist[i]
++
++        for i in range(len(filelist)):
++            new_log_name = f'operational-results-{i+1}.txt'
++            shutil.copy(f'{tmp_path}/{filelist[i]}', f'{diagpart_path}/{new_log_name}')
++
++    def get_display_mode(self):
++        if self.mode == 'normal':
++            return 'Normal mode'
++        elif self.mode == 'extended':
++            return 'Extended mode'
++        else:
++            return 'Unknown mode'
++
++    def verify_diagpart_mount(self):
++        try:
++            diagpart_check = subprocess.check_output('/alpha/bin/diagpart check'.split(), text=True)
++        except subprocess.CalledProcessError:
++            return False
++        if '/diagpart is not mounted' in diagpart_check:
++            subprocess.run('/alpha/bin/diagpart mount'.split())
++            return True
++        elif '/diagpart is mounted correctly' in diagpart_check:
++            return True
++        return False
++
++    def copy_log_to_diagpart(self):
++        folder_path = '/diagpart'
++        self.rename_files(folder_path)
++        shutil.copy('/tmp/operational-results-0.txt',
++                    '/diagpart/operational-results-0.txt')
++        # Unmount /diagpart before end of script.
++        subprocess.run('/alpha/bin/diagpart umount'.split())
++
++    # Function as the execution process of opdiag.
++    def run_opdiag(self):
++        if not self.verbose:
++            print('Initializing operational diagnostics...')
++            print(f'Version {release_version}, {release_date}')
++            print('')
++        else:
++            print('*****************************************************************')
++            print('*** DEVELOPMENT MODE, BEHAVIOR MIGHT DIFFER THAN FORMAL USAGE ***')
++            print('*****************************************************************')
++            self.child.logfile_read = sys.stdout.buffer
++
++        # Read System EEPROM
++        self.check_system_eeprom()
++
++        # Verify the mount status of the diagpart folder.
++        self.is_mounted = self.verify_diagpart_mount()
++
++        # DUT Init
++        self.dut_init()
++
++        # Check the type of test mode.
++        display_mode = self.get_display_mode()
++
++        if not self.verbose:
++            print(f'Running Power On Self Test...({display_mode})')
++        if display_mode == 'Unknown mode':
++            # The system will reboot if the mode is "unknown".
++            print('The diagnostics mode is invalid, the system will reboot!')
++            sys.exit(1)
++        print('')
++
++        # Run test items
++        for func_name in self.test_functions:
++            test_items = [item['name'] for item in self.opdiag_toml['test_items']]
++            if func_name not in test_items:
++                continue
++            else:
++                self.item_name = self.test_functions[func_name].__name__
++                flow_log_path = self.flow_log_path_from_toml.format(item_name=self.item_name)
++                if os.path.exists(flow_log_path):
++                    os.remove(flow_log_path)
++                self.test_functions[func_name]()
++            if self.result_dic[func_name] == FAIL and self.stop_if_fail:
++                self.interact()
++
++        # Start saving the log.
++        with open('/tmp/operational-results-0.txt', 'w+') as log:
++            self.save_log(log)
++
++        if no_exit:
++            self.interact()
++        else:
++            self.child.close()
++
++        print('')
++        print('Storing diagnostics result.')
++
++        # Rename files that already exist in /diagpart.
++        # Copy the log from /tmp to /diagpart and unmount /diagpart
++        if self.is_mounted:
++            self.copy_log_to_diagpart()
++        else:
++            print('Fail to store diagnostics result!')
++
++        print('Diagnostics completed.')
++        print('Waiting for reboot...')
++
++class AutoFlushFile:
++    def __init__(self, file):
++        self.file = file
++
++    def write(self, text):
++        # Write the text and flush the file
++        self.file.write(text)
++        self.file.flush()
++
++    def __getattr__(self, attr):
++        # Delegate other attributes/methods to the underlying file object
++        return getattr(self.file, attr)
++
++    def __enter__(self):
++        # If `__enter__` returns the object to be used in the `with` block, here we return self
++        return self
++
++    def __exit__(self, exc_type, exc_value, traceback):
++        # If `__exit__` returns True, it means exceptions that occur in the `with` block won't be propagated
++        return False
++
++class TestItemDecorator:
++    def __init__(self, log_file_required=False):
++        self.log_file_required = log_file_required
++    def __call__(self, func):
++        @wraps(func)
++        def wrapper(*args):
++            # args[0] contains the self parameter of the function in the class calling the decorator.
++            for item in args[0].opdiag_toml['test_items']:
++                if func.__name__ == item['name'].replace(" ", "_").lower():
++                    item_name = item['name']
++            if item_name not in args[0].test_functions:
++                return
++            if not args[0].verbose:
++                print(f'{item_name:<29s}', end='', flush=True)
++                args[0].check_dic.clear()
++                if not self.log_file_required:
++                    test_result = func(*args)
++                else:
++                    file_path = f'/tmp/{func.__name__}_res.txt'
++                    with AutoFlushFile(open(file_path, 'a')) as log_file:
++                        test_result = func(*args, log_file)
++                print(test_result)
++            else:
++                t_start = time.time()
++                args[0].send_command(f'! {"="*65}', args[0].cli_prompt)
++                args[0].send_command(f'! RUN THIS TEST ITEM: {item_name}', args[0].cli_prompt)
++                args[0].send_command(f'! {"="*65}', args[0].cli_prompt)
++                if not self.log_file_required:
++                    test_result = func(*args)
++                else:
++                    file_path = f'/tmp/{func.__name__}_res.txt'
++                    with AutoFlushFile(open(file_path, 'a')) as log_file:
++                        test_result = func(*args, log_file)
++                r_time = time.time() - t_start
++                args[0].send_command(f'! {"="*65}', args[0].cli_prompt)
++                args[0].send_command(f'! Test Item: {item_name}', args[0].cli_prompt)
++                args[0].send_command(f'! Test Result: {test_result}', args[0].cli_prompt)
++                args[0].send_command(f'! Total Time: {r_time}s', args[0].cli_prompt)
++                args[0].send_command(f'! {"="*65}', args[0].cli_prompt)
++
++            args[0].result_dic[item_name] = test_result
++
++        return wrapper
++
++class OpdiagCustom(OpdiagHelper):
++    def __init__(self, mode, verbose, stop_if_fail, no_exit):
++        super().__init__(mode, verbose, stop_if_fail, no_exit)
++
++        # Read product name early for board-specific logic.
++        self.check_system_eeprom()
++
++        # Exclude PoE test for boards without PoE hardware.
++        if self.product_name == '4630R-8T-8XE-DN':
++            del self.test_functions['PoE']
++            del self.result_dic['PoE']
++
++    def trans_product_name(self):
++        # TODO: Update mappings when final product names are confirmed.
++        product_name_map = {
++            '4630R-8W-4X-DN': '4630R-8W-4X-DN',
++            '4630R-8T-8XE-DN': '4630R-8T-8XE-DN',
++            '4630R-24W-8XE-RM': '4630R-24W-8XE-RM',
++            '4630R-4MW-12W-4XE-RM': '4630R-4MW-12W-4XE-RM',
++        }
++        return product_name_map.get(self.product_name, None)
++
++    @TestItemDecorator()
++    def i2c_environment(self):
++        '''
++        - i2c environment
++            sh "rtc --get"
++            sh "temp --get"
++            sh "i2cget -y 1 0x64 0x05"
++            sh "ctrlplane register --get BOARD_ID"
++        '''
++        '''
++        2024/06/04 TUE 11:55:33
++        '''
++        pattern = r'(\d+/\d+/\d+)\s+\w+\s+(\d+:\d+:\d+)'
++        result = self.send_command('sh "rtc --get"', pattern, timeout=3)
++        if result != PASS: return FAIL
++
++        '''
++        Thermal Sensors         Temperature          Range Mode
++        ----------------------  -------------------  ----------
++        MCU_TMP75#0             44.6250C (0xA02C)    N/A
++        MCU_TMP75#1             44.6250C (0xA02C)    N/A
++        MB_TMP75#2              38.5625C (0x9026)    N/A
++        MB_TMP75#3              38.5625C (0x9026)    N/A
++        MB_TMP75#4              38.5625C (0x9026)    N/A
++        MB_TMP75#5              38.5625C (0x9026)    N/A
++        '''
++        patterns = [
++            r'(?s)MCU_TMP75#0\s+\d+.\d+C\s+\(0x\w+\)'
++            r'.*MCU_TMP75#1\s+\d+.\d+C\s+\(0x\w+\)'
++            r'.*MB_TMP75#2\s+\d+.\d+C\s+\(0x\w+\)'
++            r'.*MB_TMP75#3\s+\d+.\d+C\s+\(0x\w+\)'
++            r'.*MB_TMP75#4\s+\d+.\d+C\s+\(0x\w+\)'
++            r'.*MB_TMP75#5\s+\d+.\d+C\s+\(0x\w+\)'
++        ]
++        result = self.send_command('sh "temp --get"', patterns, timeout=30)
++        if result != PASS: return FAIL
++
++        # Verify LED controller is accessible.
++        result = self.send_command('sh "i2cget -y 1 0x64 0x05"', r'0x\w+', '0xff')
++        if result != PASS: return FAIL
++
++        # Verify board ID.
++        board_id_map = {
++            '4630R-8W-4X-DN': '0x00',
++            '4630R-8T-8XE-DN': '0x01',
++            '4630R-24W-8XE-RM': '0x02',
++            '4630R-4MW-12W-4XE-RM': '0x03',
++        }
++        expected_board_id = board_id_map.get(self.product_name, '0x00')
++        result = self.send_command('sh "ctrlplane register --get BOARD_ID"', expected_board_id)
++        if result != PASS: return FAIL
++
++        return PASS
++
++    @TestItemDecorator()
++    def internal_flash(self):
++        '''
++        - internal flash
++            sh "/alpha/bin/diagpart check"
++            sh "/alpha/bin/diagpart umount"
++            sh "/alpha/bin/diagpart check"
++            sh "/alpha/bin/diagpart mount"
++            sh "/alpha/bin/diagpart check"
++        '''
++        if not self.is_mounted:
++            '''
++            internal flash               FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        # Don't run this test item if /diagpart is not mounted.
++        command = 'sh "/alpha/bin/diagpart check"'
++        pass_pattern = '/diagpart is mounted correctly'
++        fail_pattern = 'diagnostics_partition is not specified or not mountable'
++        mounted = self.send_command(command, pass_pattern, fail_pattern)
++        if mounted != PASS: return FAIL
++
++        with open('/diagpart/flash_test', 'w') as file:
++            file.write('Flash Test')
++
++        # The /diagpart is unmounted
++        self.send_command('sh "/alpha/bin/diagpart umount"', self.cli_prompt)
++        command = 'sh "/alpha/bin/diagpart check"'
++        pass_pattern = '/diagpart is not mounted'
++        fail_pattern = '/diagpart is mounted correctly'
++        not_mounted = self.send_command(command, pass_pattern, fail_pattern)
++        if not_mounted == FAIL or not_mounted == TIMEOUT: return FAIL
++
++        # The /diagpart is mounted
++        self.send_command('sh "/alpha/bin/diagpart mount"', self.cli_prompt)
++        command = 'sh "/alpha/bin/diagpart check"'
++        pass_pattern = '/diagpart is mounted correctly'
++        fail_pattern = '/diagpart is not mounted'
++        is_mounted = self.send_command(command, pass_pattern, fail_pattern)
++        if is_mounted == FAIL or is_mounted == TIMEOUT: return FAIL
++
++        with open('/diagpart/flash_test', 'r') as file:
++            content_read = file.read()
++            # Check content of file.
++            if 'Flash Test' not in content_read: return FAIL
++
++        self.send_command('sh "rm /diagpart/flash_test"', self.cli_prompt)
++
++        return PASS
++
++    @TestItemDecorator()
++    def memory(self):
++        '''
++        - memory
++            touch /tmp/test.txt
++            echo "Memory Test" > /tmp/test.txt
++            cat /tmp/test.txt
++            rm /tmp/test.txt
++        '''
++        self.send_command('sh', self.linux_prompt)
++        self.send_command('touch /tmp/test.txt', self.linux_prompt)
++        self.send_command('echo "Memory Test" > /tmp/test.txt', self.linux_prompt)
++        result = self.send_command('cat /tmp/test.txt', "Memory Test")
++        self.send_command('rm /tmp/test.txt', self.linux_prompt)
++        self.send_command('exit', self.cli_prompt)
++
++        return FAIL if result == FAIL else PASS
++
++    @TestItemDecorator()
++    def loopback_mac_interface(self):
++        '''
++        - loopback mac interface (time -> extended: 60, normal: 10)
++            config interface loopback all mac
++            diag loopback test intf all time <normal/extended>
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init or not self.gearbox_init:
++            '''
++            loopback mac interface          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        self.send_command('config interface loopback all mac', self.cli_prompt)
++        time.sleep(1)
++
++        pass_pattern = 'Test result: PASS'
++        fail_pattern = 'Test result: FAIL'
++        if self.mode == 'normal':
++            command = 'diag loopback test intf all time 10'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=30)
++        elif self.mode == 'extended':
++            command = 'diag loopback test intf all time 60'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=90)
++
++        return FAIL if result != PASS else PASS
++
++    @TestItemDecorator()
++    def loopback_phy_copper(self):
++        '''
++        - loopback phy copper (time -> extended: 60, normal: 10)
++            config interface loopback @ip,@u phy
++            [for RM-4MW-12W-4XE: config gearbox loopback 13-16 system]
++            [for RM-4MW-12W-4XE: config interface loopback 13-16 none]
++            diag loopback test intf @fp time <normal/extended>
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init or not self.gearbox_init:
++            '''
++            loopback phy copper          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        self.send_command('config interface loopback @ip,@u phy', self.cli_prompt)
++        time.sleep(1)
++
++        # RM-4MW-12W-4XE has gearbox ports (fp13-fp16) that need special handling.
++        if self.product_name == '4630R-4MW-12W-4XE-RM':
++            self.send_command('config gearbox loopback 13-16 system', self.cli_prompt)
++            time.sleep(1)
++            self.send_command('config interface loopback 13-16 none', self.cli_prompt)
++            time.sleep(1)
++
++        pass_pattern = 'Test result: PASS'
++        fail_pattern = 'Test result: FAIL'
++        if self.mode == 'normal':
++            command = 'diag loopback test intf @fp time 10'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=40)
++        elif self.mode == 'extended':
++            command = 'diag loopback test intf @fp time 60'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=90)
++
++        if result != PASS: return FAIL
++
++        return PASS
++
++    @TestItemDecorator()
++    def loopback_phy_fiber(self):
++        '''
++        - loopback phy fiber (time -> extended: 60, normal: 10)
++            config interface loopback @ip,@u phy
++            diag loopback test intf @ip,@u time <normal/extended>
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init or not self.gearbox_init:
++            '''
++            loopback phy fiber          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        self.send_command('config interface loopback @ip,@u phy', self.cli_prompt)
++        time.sleep(1)
++
++        pass_pattern = 'Test result: PASS'
++        fail_pattern = 'Test result: FAIL'
++        if self.mode == 'normal':
++            command = 'diag loopback test intf @ip,@u time 10'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=40)
++        elif self.mode == 'extended':
++            command = 'diag loopback test intf @ip,@u time 60'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=90)
++
++        if result != PASS: return FAIL
++
++        return PASS
++
++    @TestItemDecorator()
++    def snake_interface(self):
++        '''
++        - snake interface (time -> extended: 60, normal: 10)
++            diag snake_loopback test intf all duration <normal/extended>
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init:
++            '''
++            snake interface          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        # Set up PHY loopback on all ports before snake test
++        self.send_command('config interface loopback all phy', self.cli_prompt)
++        time.sleep(1)
++
++        pass_pattern = 'Test result: PASS'
++        fail_pattern = 'Test result: FAIL'
++        if self.mode == 'normal':
++            command = 'diag snake_loopback test intf all duration 10'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=40)
++        elif self.mode == 'extended':
++            command = 'diag snake_loopback test intf all duration 60'
++            result = self.send_command(command, pass_pattern, fail_pattern, timeout=90)
++
++        return PASS if result == PASS else FAIL
++
++    @TestItemDecorator(log_file_required=True)
++    def poe(self, log_file):
++        '''
++        - PoE
++            poe ps -d -s -p all
++        '''
++        self.send_command('sh "poe ps -d -s -p all"', self.cli_prompt)
++        output = self.pexpect_output('before')
++
++        pattern = r'(?P<port>fp\d+)\s+\|\s+[\w+\s+]+[0x\w+\s+]\|\s+(?P<status>{status})\s+(?P<error_type>{error_type})\s+\d+'
++        check_list = {
++            'status': {
++                'Disabled', 'Searching', 'Delivering Power', 'Fault', 'Requesting Power'
++            },
++            'error_type': {
++                'MPS Absent', 'Short', 'Overload', 'Power Denied', 'Startup Failure', 'NA'
++            }
++        }
++
++        status = '|'.join(check_list['status'])
++        error_type = '|'.join(check_list['error_type'])
++        pattern = pattern.format(status=status, error_type=error_type)
++
++        find = re.findall(pattern, output)
++        for idx, poe in enumerate(find):
++            port, status, error_type = poe
++            if port != f'fp{idx+1}':
++                log_file.write(
++                    f'[Failure] expected {f"fp{idx+1}"}, but the actual result is {port}.\n'
++                )
++                return FAIL
++            elif status not in check_list['status']:
++                log_file.write(
++                    f'[Failure] expected {check_list["status"]}, but the actual result is {status}.\n'
++                )
++                return FAIL
++            elif error_type not in check_list['error_type']:
++                log_file.write(
++                    f'[Failure] expected {check_list["error_type"]}, but the actual result is {error_type}.\n'
++                )
++                return FAIL
++            log_file.write(
++                f'[Success] expected: {f"fp{idx+1}"}, actual: {port}.\n'
++                f'[Success] expected: {check_list["status"]}, actual: {status}.\n'
++                f'[Success] expected: {check_list["error_type"]}, actual: {error_type}.\n'
++            )
++
++        return PASS
++
++    @TestItemDecorator(log_file_required=True)
++    def asic0_reg(self, log_file):
++        '''
++        - asic0 reg
++            bcmcmd "tc 3; tr 3; tl 3"
++            bcmcmd "tc 30; tr 30; tl 30"
++            bcmcmd "tc 31; tr 31; tl 31"
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init:
++            '''
++            asic0 reg          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        # Disable the SDK background task and re-init the SDK before ASIC test.
++        self.send_command('bcmcmd "counter off; l2mode off; linkscan off; memscan off; config add parity_enable=0"', self.cli_prompt)
++        time.sleep(1)
++        self.send_command('bcmcmd "init; init misc; init mmu"', self.cli_prompt)
++        time.sleep(2)
++
++        '''
++           S |   3| Register read/write       |    1|    1|    1|    0| (none)
++             |  30| Counter widths            |    1|    1|    1|    0| (none)
++             |  31| Counter read/write        |    1|    1|    1|    0| (none)
++        '''
++        coms_and_pats_dic = {
++            'bcmcmd "tc 3; tr 3; tl 3"':
++                r'\s+S\s+\|\s+3\|\s+Register read/write\s+\|\s+\d+\|\s+\d+\|\s+(?P<pass_count>\d+)\|\s+(?P<fail_count>\d+)\| \(none\)',
++            'bcmcmd "tc 30; tr 30; tl 30"':
++                r'\s+\|\s+30\|\s+Counter widths\s+\|\s+\d+\|\s+\d+\|\s+(?P<pass_count>\d+)\|\s+(?P<fail_count>\d+)\| \(none\)',
++            'bcmcmd "tc 31; tr 31; tl 31"':
++                r'\s+\|\s+31\|\s+Counter read/write\s+\|\s+\d+\|\s+\d+\|\s+(?P<pass_count>\d+)\|\s+(?P<fail_count>\d+)\| \(none\)'
++        }
++
++        for item in coms_and_pats_dic.items():
++            command, pattern = item
++            self.send_command(command, self.cli_prompt)
++            output = self.pexpect_output('before')
++            find = re.search(pattern, output)
++            pass_count = find.group('pass_count')
++            fail_count = find.group('fail_count')
++            if int(pass_count) == 0 or int(fail_count) != 0:
++                log_file.write(
++                    f'[Failure]{command}: {pass_count} pass count, {fail_count} fail count.'
++                )
++                return FAIL
++            log_file.write(
++                f'[Success]{command}: {pass_count} pass count, {fail_count} fail count.'
++            )
++
++        return PASS
++
++    @TestItemDecorator(log_file_required=True)
++    def asic0_mem(self, log_file):
++        '''
++        - asic0 mem
++            bcmcmd "tc 50; rcload /alpha/bcm/asic/stark_wh3p_asic_test.script; tl 50"
++        '''
++        # Don't run this test item if DUT initialization has failed or has not been run.
++        if not self.mac_init:
++            '''
++            asic0 mem          FAIL
++            '''
++            # Ensure that the test item remains active for at least two seconds.
++            time.sleep(2)
++            return FAIL
++
++        '''
++           S |  50| Memory Fill/Verify        |    1|  478|  478|    0| (none)
++        '''
++        command = 'bcmcmd "tc 50; rcload /alpha/bcm/asic/stark_wh3p_asic_test.script; tl 50"'
++        # This script's testing time depends on the specific ASIC being used.
++        self.send_command(command, pass_pattern=self.cli_prompt, timeout=150)
++        output = self.pexpect_output('before')
++        pattern = r'\s+\|\s+50\|\s+Memory Fill/Verify\s+\|\s+\d+\|\s+\d+\|\s+(?P<pass_count>\d+)\|\s+(?P<fail_count>\d+)\| \(none\)'
++        find = re.search(pattern, output)
++        pass_count = find.group('pass_count')
++        fail_count = find.group('fail_count')
++        if int(pass_count) == 0 or int(fail_count) != 0:
++            log_file.write(
++                f'[Failure]{command}: {fail_count} fail count.'
++            )
++            return FAIL
++        log_file.write(
++            f'[Success]{command}: {fail_count} fail count.'
++        )
++
++        return PASS
++
++if __name__ == '__main__':
++    parser = cli_parser()
++    args = parser.parse_args()
++    mode = args.mode
++    verbose = args.verbose
++    release_version = args.release_version
++    release_date = args.release_date
++    stop_if_fail = args.stop_if_fail
++    no_exit = args.no_exit
++
++    opdiag = OpdiagCustom(mode, verbose, stop_if_fail, no_exit)
++    opdiag.run_opdiag()
+--- /dev/null
++++ b/rootfs.overlay/alpha/bin/pldwdtd
+@@ -0,0 +1,34 @@
++#!/bin/sh
++
++KICK_PERIOD=10
++PIDFILE=/tmp/pldwdtd.pid
++LOGFILE=/tmp/pldwdtd.log
++
++exec 2>&1 >>$LOGFILE
++
++kick()
++{
++    while true; do
++        uptime
++        ctrlplane watchdog --kick
++        sleep ${KICK_PERIOD}
++    done
++}
++
++cleanup()
++{
++    rm -f $PIDFILE
++    exit
++}
++
++[ -e $PIDFILE ] && exit 1
++
++trap cleanup EXIT
++
++if [ "`ctrlplane register --get WATCHDOG.ENABLE`" == "1" ]; then
++    echo "PLD Watchdog is enabled, keep kicking with period ${KICK_PERIOD} seconds"
++    echo $$ > $PIDFILE
++    kick
++else
++    echo "PLD Watchdog is disabled, skip it"
++fi
+--- /dev/null
++++ b/rootfs.overlay/alpha/toml/opdiag.toml
+@@ -0,0 +1,38 @@
++[opdiag]
++linux_prompt = '(?:\(KLISH\)\s)?alphadiags:(?:\/\w+)*\/?#\s*'
++cli_prompt = 'DIN-8W-4X>>\s*|DIN-8T-8XE>>\s*|RM-24W-8XE>>\s*|RM-4MW-12W-4XE>>\s*'
++verbose_log_path = '/tmp/verbose.log'
++flow_log_path = '/tmp/{item_name}_res.txt'
++
++#
++# NOTE: DO NOT CHANGE THE ITEM ORDER
++#
++[[opdiag.test_items]]
++name = 'i2c environment'
++
++[[opdiag.test_items]]
++name = 'internal flash'
++
++[[opdiag.test_items]]
++name = 'memory'
++
++[[opdiag.test_items]]
++name = 'loopback mac interface'
++
++[[opdiag.test_items]]
++name = 'loopback phy copper'
++
++[[opdiag.test_items]]
++name = 'loopback phy fiber'
++
++[[opdiag.test_items]]
++name = 'snake interface'
++
++[[opdiag.test_items]]
++name = 'PoE'
++
++[[opdiag.test_items]]
++name = 'asic0 reg'
++
++[[opdiag.test_items]]
++name = 'asic0 mem'
+--- /dev/null
++++ b/rootfs.overlay/etc/init.d/S15pldwdt
+@@ -0,0 +1,20 @@
++#!/bin/sh
++
++# Alphanetworks, Inc
++#
++# Script to invoke daemon to kick Extreme watchdog.
++
++case "$1" in
++  start)
++      start-stop-daemon -S -b -x /alpha/bin/pldwdtd
++      ;;
++  stop)
++      start-stop-daemon -K -n pldwdtd
++      ;;
++  *)
++      echo $"Usage: $0 {start|stop}"
++      exit 1
++esac
++
++exit $?
++
+--- /dev/null
++++ b/rootfs.overlay/etc/profile.d/99-opdiag.sh
+@@ -0,0 +1,315 @@
++#!/bin/sh
++
++#
++# Alpha Networks, Inc.
++#
++# This script is a part of Operational Diagnostics. It prepare the environment
++# for running tests.
++#
++
++set -o nounset
++# DEVELOPMENT ONLY
++#set -o xtrace
++
++console_default=
++
++# OPDIAG_VERBOSE
++#
++# ** It is a development feature **
++#
++# boot param: opdiag_debug_for_internal_use
++#
++#   empty: no verbose message (default)
++#   non-empty: verbose message
++export OPDIAG_VERBOSE=
++
++# OPDIAG_DEV
++#
++# ** It is a development feature **
++#
++# boot param: meta option, no boot param
++#
++# It will be updated automatically
++export OPDIAG_DEV=
++
++# OPDIAG_NO_REBOOT
++#
++# ** It is a development feature **
++#
++# boot param: opdiag_no_reboot
++#
++# Don't reboot and raise a shell when Operational Diagnostics ends
++#
++export OPDIAG_NO_REBOOT=
++
++# OPDIAG_LINUXSH
++#
++# ** It is a development feature **
++#
++# boot param: opdiag_linuxsh
++#
++# Raise Linux shell after boot.
++#
++export OPDIAG_LINUXSH=
++
++# OPDIAG_STOP_IF_FAIL
++#
++# ** It is a development feature **
++#
++# boot param: opdiag_stop_if_fail
++#
++# Once test item fails, stop testing and raise a shell.
++#
++export OPDIAG_STOP_IF_FAIL=
++
++# OPDIAG_MODE
++#
++# boot param: opdiag_mode=<mode>
++#   <mode>:
++#       normal: normal mode
++#       extended: extended mode (longer test time)
++#
++# Choose the test mode of operational diagnostics.
++#
++export OPDIAG_MODE=
++
++# OPDIAG_DIAGPART
++#
++# boot param: diagnostics_partition=<path to block device>
++#
++# For summit-stark, it should point to the partition for storing test result and
++# "internal flash" test. If this option is not provided, test result will not be
++# stored and "internal flash" test will do nothing and reports FAIL.
++#
++export OPDIAG_DIAGPART=
++
++verbose()
++{
++    if [ -n "${OPDIAG_VERBOSE}" ]; then
++        printf "\e[1;33m[VERBOSE] $@\n\e[0m"
++    fi
++}
++
++do_reboot()
++{
++    verbose "$0: Rebooting"
++
++    if [ -n "${OPDIAG_NO_REBOOT}" ]; then
++        echo "*** 'opdiag_no_reboot' detected, switch to Linux shell"
++        run_linuxsh
++    fi
++
++    # Suppress output.
++    if [ ! -n "${OPDIAG_VERBOSE}" ]; then
++        exec >/dev/null
++        exec 2>/dev/null
++    fi
++
++    # Umount diagnostics partition.
++    /alpha/bin/diagpart umount
++
++    # Stop RC services.
++    /etc/init.d/rcK
++
++    # Fallback reboot, it should not be executed.
++    sleep 3; reboot
++}
++
++# For summit-stark, the console is /dev/ttyS0,115200
++init_console()
++{
++    verbose "$0: Initialize console"
++
++    # Setup console port
++    # Baud => 115200
++    # Backup configuration
++    # Cancel "echo" to prevent odd display
++    stty -F /dev/ttyS0 115200
++    console_default="`stty -g -F /dev/ttyS0`"
++    stty -F /dev/ttyS0 -echo
++
++    exec >/dev/ttyS0
++    exec 2>/dev/null
++}
++
++fake_test()
++{
++    printf "%-29s" "$1"
++    sleep $2
++    if [ "$((RANDOM % 10))" == "1" ]; then
++        printf "FAIL\n"
++    else
++        printf "PASS\n"
++    fi
++}
++
++fake_opdiag()
++{
++    verbose "$0: Start"
++    echo "*****************************************************************"
++    echo "* Only for Early development                                    *"
++    echo "* Below test items are fake and do nothing. Test result is set  *"
++    echo "* randomly                                                      *"
++    echo "*****************************************************************"
++
++    if [ "${OPDIAG_MODE}" == "extended" ]; then
++        local mode_string="Extended mode"
++    elif [ "${OPDIAG_MODE}" == "normal" ]; then
++        local mode_string="Normal mode"
++    else
++        local mode_string="Unknown mode"
++    fi
++    echo "Initializing operational diagnostics..."
++    echo "Version ${RELEASE_VERSION}, ${RELEASE_DATE}"
++    echo
++    echo "Running Power On Self Test...(${mode_string})"
++    if [ "${OPDIAG_MODE}" != "normal" -a "${OPDIAG_MODE}" != "extended" ]; then
++        echo "The diagnostics mode is invalid, the system will reboot!"
++        return 1
++    fi
++    echo
++
++    fake_test "i2c environment" 1
++    fake_test "internal flash" 1
++    fake_test "memory" 1
++    fake_test "loopback mac interface" 1
++    fake_test "loopback phy copper" 1
++    fake_test "loopback phy fiber" 1
++    fake_test "snake interface" 1
++    fake_test "PoE" 1
++    fake_test "asic0 reg" 1
++    fake_test "asic0 mem" 1
++
++    echo
++    echo "Storing diagnostics result."
++    echo "Diagnostics completed."
++    echo "Waiting for reboot..."
++    verbose "$0: End"
++}
++
++parse_opdiag_opt()
++{
++    set -- $(cat /proc/cmdline)
++    for x in "$@"; do
++        case "$x" in
++            # Normal option
++            opdiag_mode=*)
++                OPDIAG_MODE="${x#opdiag_mode=}"
++                ;;
++            diagnostics_partition=*)
++                OPDIAG_DIAGPART="${x#diagnostics_partition=}"
++                ;;
++            # Development/Debug option
++            opdiag_debug_for_internal_use)
++                OPDIAG_VERBOSE=1
++                OPDIAG_DEV=1
++                ;;
++            # # Comment - Only for internal debug use.
++            # opdiag_linuxsh)
++            #     OPDIAG_LINUXSH=1
++            #     OPDIAG_DEV=1
++            #     touch /tmp/OPDIAG
++            #     ;;
++            # opdiag_stop_if_fail)
++            #     OPDIAG_STOP_IF_FAIL=1
++            #     OPDIAG_DEV=1
++            #     ;;
++            # opdiag_no_reboot)
++            #     OPDIAG_NO_REBOOT=1
++            #     OPDIAG_DEV=1
++            #     ;;
++            *)
++                ;;
++        esac
++    done
++}
++
++run_opdiag()
++{
++    verbose "$0: Start"
++
++    local extra_option=""
++
++    [ -n "${OPDIAG_STOP_IF_FAIL}" ] && extra_option="${extra_option} --stop-if-fail"
++    [ -n "${OPDIAG_NO_REBOOT}" ] && extra_option="${extra_option} --no-exit"
++    [ -n "${OPDIAG_VERBOSE}" ] && extra_option="${extra_option} --verbose"
++
++    /alpha/bin/opdiag \
++        --mode="${OPDIAG_MODE}" \
++        --release-version="${RELEASE_VERSION}" \
++        --release-date="${RELEASE_DATE}" \
++        ${extra_option}
++
++    verbose "$0: End"
++}
++
++run_linuxsh()
++{
++    init_console
++
++    stty -F /dev/ttyS0 "${console_default}"
++    stty -F /dev/ttyS0 echo
++
++    exec </dev/ttyS0
++    exec >/dev/ttyS0
++    exec 2>/dev/ttyS0
++
++    exec /bin/bash -l
++}
++
++################################################################################
++# Prepare and run
++################################################################################
++
++parse_opdiag_opt
++
++if [ -e /tmp/OPDIAG ]; then
++    # # Comment - Only for internal debug use.
++    # verbose "/tmp/OPDIAG detected, skipped"
++    return 0
++else
++    touch /tmp/OPDIAG
++fi
++
++if [ ! -e /etc/RELEASE.diag ]; then
++    verbose "Fatal error! /etc/RELEASE.diag is not found!"
++    return 1
++fi
++
++source /etc/RELEASE.diag
++
++init_console
++
++if [ -n "${OPDIAG_DEV}" ]; then
++    echo "*****************************************************************"
++    echo "*** DEVELOPMENT MODE, BEHAVIOR MIGHT DIFFER THAN FORMAL USAGE ***"
++    echo "***         THIS MODE IS ONLY FOR INTERNAL DEBUG USE          ***"
++    echo "*****************************************************************"
++    echo "`printenv`"
++    echo "*****************************************************************"
++    echo "`cat /proc/cmdline`"
++    echo "*****************************************************************"
++    echo "`mount`"
++    echo "*****************************************************************"
++    echo "`uname -a`"
++    echo "*****************************************************************"
++    exec 2>&1
++    /alpha/bin/alphach --register
++fi
++
++
++if [ -n "${OPDIAG_LINUXSH}" ]; then
++    echo "*** 'opdiag_linuxsh' detected, switch to Linux shell"
++    echo "*** Run '/alpha/bin/opdiag --help' to know how to run Operational Diagnostics manually"
++    run_linuxsh
++fi
++
++# Clear console screen.
++clear
++
++# Run test.
++#fake_opdiag
++run_opdiag
++
++# Ends, reboot.
++do_reboot
