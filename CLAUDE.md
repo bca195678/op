@@ -26,6 +26,7 @@ This repo ships Claude Code skills invokable via slash commands:
 | Ledcam | `/ledcam` | USB camera LED color detection for STARK front panel — calibrate, live feed, ROI selection (with profiles), and detect (green/amber/off) |
 | Standup | `/standup` | Set up WinPython environment — extract installer, install pip packages, verify (counterpart to /teardown) |
 | Teardown | `/teardown` | Clean up session state — kill HTTP servers, optionally remove NAT and power off DUT |
+| Devloop | `/devloop` | Iterative fix-build-netboot-verify cycle — edit source on build server, rebuild, netboot to DUT, check results, repeat until it works |
 
 Detailed skill documentation is in `.claude/skills/<skill>/SKILL.md`.
 
