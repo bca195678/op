@@ -479,6 +479,21 @@ bash docker.sh make all -j16
 
 Without `rm -rf build/diagpy`, the old wheel is repackaged and the fix does not take effect.
 
+### Rebuilding After rootfs.overlay Changes
+
+Files in `rootfs.overlay/` (opdiag script, init, quickstart scripts, configs) are cached in `build/rootfs/`. The overlay is NOT re-applied on subsequent builds unless you clear it:
+
+```bash
+cd ~/project/opdiag/summit-stark
+rm -rf build/rootfs
+bash docker.sh make all -j16
+```
+
+**This is the sneakiest cache.** Unlike diagpy, there is no obvious error — the build succeeds but silently packages the old files. Always verify after rebuild:
+```bash
+grep 'your_change' build/rootfs/alpha/bin/opdiag
+```
+
 ### Rebuilding Kernel After Defconfig Changes
 
 Similarly, kernel defconfig changes (e.g., log levels, MAGIC_SYSRQ) require cleaning the kernel build:

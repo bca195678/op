@@ -83,8 +83,8 @@ cd ~/project/opdiag/summit-stark
 |-------------------|--------------------------|
 | `diagnostics/diagpy/` (Python) | `rm -rf build/diagpy` — Makefile skips rebuild if directory exists |
 | `diagnostics/diagk/` (C/Klish) | `rm -rf build/diagk` — same caching behavior |
-| `rootfs.overlay/` (configs, scripts) | No extra step needed |
-| `linux-*/` (kernel defconfig) | May need `rm -rf build/linux` for config changes |
+| `rootfs.overlay/` (configs, scripts, opdiag) | `rm -rf build/rootfs` — overlay is cached and NOT re-applied without this |
+| `linux-*/` (kernel defconfig) | `rm -rf build/linux` — required for config changes |
 | `buildroot-fs/` (rootfs defconfig) | May need full `rm -rf build/buildroot` |
 
 Build command:
@@ -167,7 +167,12 @@ If the image works → done. If not → go back to Step 1.
 
 1. **Silent crashes** — `prep_opdiag()` in the init script redirects stdout/stderr to `/dev/null` in normal mode. Always use `opdiag_debug_for_internal_use` during development.
 
-2. **diagpy wheel caching** — The Makefile checks `if [ ! -d build/diagpy ]` before building. After editing any file under `diagnostics/diagpy/`, you MUST `rm -rf build/diagpy` or the old wheel is repackaged.
+2. **Build cache — ALL components are cached.** The build system caches aggressively. After editing source, you MUST clear the relevant `build/` subdirectory or your changes are silently ignored:
+   - `rm -rf build/diagpy` — after editing `diagnostics/diagpy/` (Python wheel)
+   - `rm -rf build/diagk` — after editing `diagnostics/diagk/` (C/Klish)
+   - `rm -rf build/rootfs` — after editing `rootfs.overlay/` (opdiag script, init, configs, quickstart scripts)
+   - `rm -rf build/linux` — after editing kernel defconfig
+   - When in doubt, `rm -rf build/rootfs build/diagpy` covers the most common cases.
 
 3. **TFTP server timeout** — The TFTP server auto-exits after its timeout. For large images (~43MB), the transfer takes ~30s. Set timeout to at least 180s to account for rebuild delays.
 
@@ -178,6 +183,8 @@ If the image works → done. If not → go back to Step 1.
 6. **Load address** — STARK DRAM is `0x60000000–0xdfffffff`. Always use `0x70000000`. The old AXN-2020 address `0x210000000` is out of range.
 
 7. **FIT config** — `bootm 0x70000000` with no `#config` suffix. The default FIT configuration `stark` is selected automatically.
+
+8. **rootfs.overlay cache is the sneakiest** — Unlike diagpy (which at least requires a missing directory), the rootfs overlay is silently stale. If you edit `rootfs.overlay/alpha/bin/opdiag` and rebuild without `rm -rf build/rootfs`, the old opdiag is packaged into the image. Always verify: `grep 'your_change' build/rootfs/alpha/bin/opdiag` after rebuilding.
 
 ---
 
