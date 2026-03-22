@@ -186,6 +186,8 @@ If the image works → done. If not → go back to Step 1.
 
 8. **rootfs.overlay cache is the sneakiest** — Unlike diagpy (which at least requires a missing directory), the rootfs overlay is silently stale. If you edit `rootfs.overlay/alpha/bin/opdiag` and rebuild without `rm -rf build/rootfs`, the old opdiag is packaged into the image. Always verify: `grep 'your_change' build/rootfs/alpha/bin/opdiag` after rebuilding.
 
+9. **diagk XML syntax** — If `diagnostics/diagk/cli/xml/diag-cmd.xml` has malformed XML (e.g., missing attribute quotes), the CLI silently fails to load and opdiag crashes with `Unable to open file '/alpha/xml/diag-cmd.xml'`. Always validate XML after editing: `python3 -c "import xml.etree.ElementTree as ET; ET.parse('diagnostics/diagk/cli/xml/diag-cmd.xml'); print('OK')"`
+
 ---
 
 ## Example Prompt

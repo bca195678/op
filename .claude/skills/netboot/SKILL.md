@@ -26,7 +26,7 @@ HOST_IP     = 30.0.0.1
 DUT_IP      = 30.0.0.100
 LOAD_ADDR   = 0x70000000
 BUILD_SERVER = chester@172.31.230.36
-IMAGE_REMOTE = ~/project/opdiag/stark-diag/image
+IMAGE_REMOTE = ~/project/opdiag/summit-stark/image
 IMAGE_DIR    = ./tmp
 ```
 
@@ -40,13 +40,13 @@ List available images on the remote server, then fetch the latest:
 
 ```bash
 # Discover image name (exclude .md5 and .gz files)
-IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/stark-diag/image/ | grep -v -E "\.(md5|gz)$"')
+IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/summit-stark/image/ | grep -v -E "\.(md5|gz)$"')
 echo "Image found: $IMAGE"
 
 # Fetch image and checksum
 mkdir -p ./tmp
-scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE" \
-    chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE".md5 \
+scp chester@172.31.230.36:~/project/opdiag/summit-stark/image/"$IMAGE" \
+    chester@172.31.230.36:~/project/opdiag/summit-stark/image/"$IMAGE".md5 \
     ./tmp/
 ```
 
@@ -91,11 +91,11 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 
 ```bash
 # 1. Discover and fetch image
-IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/stark-diag/image/ | grep -v -E "\.(md5|gz)$"')
+IMAGE=$(ssh chester@172.31.230.36 'ls ~/project/opdiag/summit-stark/image/ | grep -v -E "\.(md5|gz)$"')
 echo "Image: $IMAGE"
 mkdir -p ./tmp
-scp chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE" \
-    chester@172.31.230.36:~/project/opdiag/stark-diag/image/"$IMAGE".md5 \
+scp chester@172.31.230.36:~/project/opdiag/summit-stark/image/"$IMAGE" \
+    chester@172.31.230.36:~/project/opdiag/summit-stark/image/"$IMAGE".md5 \
     ./tmp/
 
 # 2. Start TFTP server in background (60s window)

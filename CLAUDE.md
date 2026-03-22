@@ -54,7 +54,8 @@ Standard configuration for the STARK network switch platform:
 - **Linux shell prompt:** `alphadiags:/#`
 - **U-Boot prompt:** `u-boot>`
 - **Login required:** No (engineering sample)
-- **Build server:** `chester@172.31.230.36` — project at `~/project/opdiag/stark-diag/`
+- **Build server:** `chester@172.31.230.36` — project at `~/project/opdiag/summit-stark/` (same repo as `stark-diag/`, different local clone)
+- **Enter CLI from Linux shell:** `cli` (starts diagk Klish CLI)
 - **If device is at U-Boot:** type `boot` to boot into Linux
 
 ## Temporary Files

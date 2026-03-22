@@ -330,8 +330,10 @@ config interface loopback @ip,@u phy
 diag loopback test intf @ip,@u time <n>
 ```
 
-**snake_interface** — Use `all` wildcard (like summit-rz):
+**snake_interface** — Requires PHY loopback setup before running, and `diag snake_loopback` CLI command must be wired up (see Step 17):
 ```python
+self.send_command('config interface loopback all phy', self.cli_prompt)
+time.sleep(1)
 command = f'diag snake_loopback test intf all duration {10 if normal else 60}'
 ```
 
@@ -360,7 +362,18 @@ bcmcmd "tc 31; tr 31; tl 31"
 command = 'bcmcmd "tc 50; rcload /alpha/bcm/asic/stark_wh3p_asic_test.script; tl 50"'
 ```
 
-**dut_init** — Uses `show gearbox interface status` (confirmed from stark-diag XML)
+**dut_init** — Must conditionally check gearbox status based on board type. Only RM-4MW-12W-4XE has gearbox hardware. Without the conditional, `show gearbox interface status` returns an error on non-gearbox boards, causing `gearbox_init` to stay False and 4 tests to auto-FAIL:
+```python
+# In dut_init(), replace unconditional gearbox check with:
+if 'gearbox_toml' in Board_INFO()._board_info:
+    self.send_command('show gearbox interface status', self.cli_prompt)
+    gearbox_init_result = self.pexpect_output('before')
+    gearbox_init_fail = re.findall(init_error_pattern, gearbox_init_result)
+    if not gearbox_init_fail:
+        self.gearbox_init = True
+else:
+    self.gearbox_init = True  # No gearbox on this board
+```
 
 ### Step 5: Copy Generic Utilities
 
@@ -434,6 +447,36 @@ project_name := summit-stark
 
 Confirm `rootfs.overlay/alpha/bcm/asic/stark_wh3p_asic_test.script` is present (already in stark-diag).
 
+### Step 17: Wire Up `diag snake_loopback` CLI Command
+
+The snake test C source (`diag_snake.c`) and CLI handler (`CLI_DIAG_Snake_Test` in `cli_diag.c`) already exist in stark-diag but are **not registered** in the CLI. Two files need changes:
+
+**1. Add XML command definition** to `diagnostics/diagk/cli/xml/diag-cmd.xml` (before `</VIEW>`):
+```xml
+<COMMAND name="diag snake_loopback" help="Execute diag snake test">
+    <PARAM name="test" help="Execute diag snake test" mode="subcommand" ptype="SUBCOMMAND">
+        <PARAM name="intf" help="Set test port range" mode="subcommand" ptype="SUBCOMMAND" optional="true">
+            <PARAM name="intflist" help="Interfaces" ptype="INTFSELECTOR" />
+        </PARAM>
+        <PARAM name="duration" help="Set test time duaration" mode="subcommand" ptype="SUBCOMMAND" optional="true">
+            <PARAM name="duration_second" help="Test duration in second" ptype="UINT" default="10"/>
+        </PARAM>
+    </PARAM>
+    <ACTION builtin="CLI_DIAG_Snake_Test">${__full_line}</ACTION>
+</COMMAND>
+```
+
+> **Warning:** Malformed XML (missing attribute quotes) causes the CLI to silently fail to load. Always validate: `python3 -c "import xml.etree.ElementTree as ET; ET.parse('diagnostics/diagk/cli/xml/diag-cmd.xml')"`
+
+**2. Register the CLI function** in `diagnostics/diagk/cli/src/cli_init.c` — add inside `CLISH_PLUGIN_INIT(mfg)`:
+```c
+CLI_ADD_FUNC(CLI_DIAG_Snake_Test);
+```
+
+No Makefile changes needed — both `diag_snake.c` and `cli_diag.c` are already compiled by wildcard patterns.
+
+Requires `rm -rf build/diagk` before rebuild.
+
 ---
 
 ## Critical Files Summary
@@ -456,6 +499,8 @@ Confirm `rootfs.overlay/alpha/bcm/asic/stark_wh3p_asic_test.script` is present (
 | MODIFY | `linux-*/arch/arm64/configs/*_defconfig` | Disable MAGIC_SYSRQ, add quiet log levels |
 | MODIFY | `buildroot-fs/configs/*_defconfig` | Remove debug packages |
 | MODIFY | `env.mk` | Update project_name |
+| MODIFY | `diagnostics/diagk/cli/xml/diag-cmd.xml` | Add `diag snake_loopback` command definition |
+| MODIFY | `diagnostics/diagk/cli/src/cli_init.c` | Register `CLI_DIAG_Snake_Test` function |
 | DELETE | `etc/init.d/S91diagenv` | Mfg-only |
 | DELETE | `etc/init.d/S99diagps` | Mfg-only |
 | DELETE | `etc/init.d/S80mount` | Replaced by diagpart |
@@ -531,7 +576,9 @@ setenv bootargs console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_interna
 4. **opdiag script**: All test functions handle all 4 board variants
 5. **PoE exclusion**: DIN-8T-8XE (4630R-8T-8XE-DN) removes PoE from test_functions/result_dic at init
 6. **Gearbox**: RM-4MW-12W-4XE loopback_phy_copper properly configures gearbox loopback
-7. **ASIC test**: `stark_wh3p_asic_test.script` path correct in asic0_mem
+7. **Snake test**: `diag snake_loopback` command works in CLI (Step 17 wiring done), and opdiag sets PHY loopback before running it
+7b. **Internal flash**: Fails on netboot (no `/diagpart` partition) — this is expected. Only passes when booted from flash with a mounted diagnostics partition
+8. **ASIC test**: `stark_wh3p_asic_test.script` path correct in asic0_mem
 8. **init**: `prep_opdiag()` present, mdev hotplug removed, alphach moved to 99-opdiag.sh
 9. **Quickstart scripts**: All have `config vlan member delete 1 all` and `config interface loopback all mac`
 10. **prompt.sh**: Uses `KLISH=${KLISH:-}` and quoted `[ -n "$KLISH" ]`
