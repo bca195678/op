@@ -123,6 +123,8 @@ The mfg init is minimal (mount filesystems, set hostname, enable mdev hotplug, r
 - **Removed**: `/alpha/bin/alphach --register` — coredump handler is moved to `99-opdiag.sh` and only runs conditionally in `OPDIAG_DEV` mode.
 - **Added**: `prep_opdiag()` function, devpts mount, /dev/shm mount, /dev/fd symlink, /var/run and /var/lock directories.
 
+**Known cosmetic issue:** The line `mount -t tmpfs -o nodev,nosuid,noexec shm /dev/shm` may produce `mount: mounting shm on /dev/shm failed: Invalid argument` on some kernels. This is **non-fatal** and does not affect opdiag operation. It appears on the serial console between `Starting kernel ...` and `Initializing operational diagnostics...` as `[H[J` (ANSI clear screen) immediately follows it.
+
 ### 1.9 Quickstart Script Modifications
 
 Mfg quickstart scripts initialize hardware for interactive use. Opdiag quickstart scripts add two critical lines to isolate ports for loopback testing:
@@ -160,16 +162,23 @@ Remove manufacturing-only Python packages that are not needed for opdiag:
 
 ### 1.11 Linux Kernel Defconfig Changes
 
-Opdiag needs a quieter console to prevent kernel messages from interfering with test output:
+Opdiag needs a quieter console to prevent kernel messages from interfering with test output. The manufacturing defconfig typically has `LOGLEVEL_DEFAULT=7` (verbose) and `PRINTK_TIME=y` — these must be changed:
 
 ```
 # Disable Magic SysRq (not needed in field, security risk)
 # CONFIG_MAGIC_SYSRQ is not set
 
+# Disable kernel message timestamps (noisy on console)
+# CONFIG_PRINTK_TIME is not set
+
 # Suppress kernel console messages (only emergencies)
 CONFIG_CONSOLE_LOGLEVEL_DEFAULT=1
 CONFIG_CONSOLE_LOGLEVEL_QUIET=1
 ```
+
+**Why this matters:** Without these changes, every kernel message (including timestamped driver init lines) appears on the serial console between `Starting kernel ...` and `Initializing operational diagnostics...`. With `LOGLEVEL=1`, only emergency messages pass through. Combined with `prep_opdiag()` in the init script (which redirects stdout/stderr to `/dev/null` and disables the ttyS0 console), this produces a clean output identical to summit-bcma55.
+
+**Note:** After changing the defconfig, the kernel must be rebuilt: `rm -rf build/linux` before `make all`.
 
 ### 1.12 Buildroot Defconfig Changes
 
@@ -405,7 +414,10 @@ Fix `nounset` safety in `rootfs.overlay/etc/profile.d/prompt.sh`:
 
 Edit `linux-*/arch/arm64/configs/alphadiags_defconfig`:
 - Disable `CONFIG_MAGIC_SYSRQ`
-- Add `CONFIG_CONSOLE_LOGLEVEL_DEFAULT=1` and `CONFIG_CONSOLE_LOGLEVEL_QUIET=1`
+- Disable `CONFIG_PRINTK_TIME` (mfg default is `y` — adds noisy timestamps)
+- Change `CONFIG_CONSOLE_LOGLEVEL_DEFAULT` from `7` to `1`
+- Change `CONFIG_CONSOLE_LOGLEVEL_QUIET` from `4` to `1`
+- Requires `rm -rf build/linux` before rebuild
 
 ### Step 14: Modify Buildroot Defconfig
 
@@ -467,6 +479,16 @@ bash docker.sh make all -j16
 
 Without `rm -rf build/diagpy`, the old wheel is repackaged and the fix does not take effect.
 
+### Rebuilding Kernel After Defconfig Changes
+
+Similarly, kernel defconfig changes (e.g., log levels, MAGIC_SYSRQ) require cleaning the kernel build:
+
+```bash
+cd ~/project/opdiag/summit-stark
+rm -rf build/linux
+bash docker.sh make all -j16
+```
+
 ### Testing via Netboot
 
 To test without flashing, TFTP-boot the image into U-Boot:
@@ -500,7 +522,7 @@ setenv bootargs console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_interna
 10. **prompt.sh**: Uses `KLISH=${KLISH:-}` and quoted `[ -n "$KLISH" ]`
 11. **requirements.txt**: Only `diagpy`, `pyserial`, `pexpect` remain
 12. **Wheel files**: Only `pexpect`, `ptyprocess`, `pyserial`, `smbus2`, `toml` remain
-13. **Kernel defconfig**: `MAGIC_SYSRQ` disabled, `CONSOLE_LOGLEVEL_DEFAULT=1`, `CONSOLE_LOGLEVEL_QUIET=1`
+13. **Kernel defconfig**: `MAGIC_SYSRQ` disabled, `PRINTK_TIME` disabled, `CONSOLE_LOGLEVEL_DEFAULT=1`, `CONSOLE_LOGLEVEL_QUIET=1`
 14. **Buildroot defconfig**: No GDB, strace, stress-ng, valgrind
 
 ---
