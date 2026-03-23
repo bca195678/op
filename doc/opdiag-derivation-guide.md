@@ -123,8 +123,6 @@ The mfg init is minimal (mount filesystems, set hostname, enable mdev hotplug, r
 - **Removed**: `/alpha/bin/alphach --register` — coredump handler is moved to `99-opdiag.sh` and only runs conditionally in `OPDIAG_DEV` mode.
 - **Added**: `prep_opdiag()` function, devpts mount, /dev/shm mount, /dev/fd symlink, /var/run and /var/lock directories.
 
-**Known cosmetic issue:** The line `mount -t tmpfs -o nodev,nosuid,noexec shm /dev/shm` may produce `mount: mounting shm on /dev/shm failed: Invalid argument` on some kernels. This is **non-fatal** and does not affect opdiag operation. It appears on the serial console between `Starting kernel ...` and `Initializing operational diagnostics...` as `[H[J` (ANSI clear screen) immediately follows it.
-
 ### 1.9 Quickstart Script Modifications
 
 Mfg quickstart scripts initialize hardware for interactive use. Opdiag quickstart scripts add two critical lines to isolate ports for loopback testing:
@@ -162,23 +160,16 @@ Remove manufacturing-only Python packages that are not needed for opdiag:
 
 ### 1.11 Linux Kernel Defconfig Changes
 
-Opdiag needs a quieter console to prevent kernel messages from interfering with test output. The manufacturing defconfig typically has `LOGLEVEL_DEFAULT=7` (verbose) and `PRINTK_TIME=y` — these must be changed:
+Opdiag needs a quieter console to prevent kernel messages from interfering with test output:
 
 ```
 # Disable Magic SysRq (not needed in field, security risk)
 # CONFIG_MAGIC_SYSRQ is not set
 
-# Disable kernel message timestamps (noisy on console)
-# CONFIG_PRINTK_TIME is not set
-
 # Suppress kernel console messages (only emergencies)
 CONFIG_CONSOLE_LOGLEVEL_DEFAULT=1
 CONFIG_CONSOLE_LOGLEVEL_QUIET=1
 ```
-
-**Why this matters:** Without these changes, every kernel message (including timestamped driver init lines) appears on the serial console between `Starting kernel ...` and `Initializing operational diagnostics...`. With `LOGLEVEL=1`, only emergency messages pass through. Combined with `prep_opdiag()` in the init script (which redirects stdout/stderr to `/dev/null` and disables the ttyS0 console), this produces a clean output identical to summit-bcma55.
-
-**Note:** After changing the defconfig, the kernel must be rebuilt: `rm -rf build/linux` before `make all`.
 
 ### 1.12 Buildroot Defconfig Changes
 
@@ -330,10 +321,8 @@ config interface loopback @ip,@u phy
 diag loopback test intf @ip,@u time <n>
 ```
 
-**snake_interface** — Requires PHY loopback setup before running, and `diag snake_loopback` CLI command must be wired up (see Step 17):
+**snake_interface** — Use `all` wildcard (like summit-rz):
 ```python
-self.send_command('config interface loopback all phy', self.cli_prompt)
-time.sleep(1)
 command = f'diag snake_loopback test intf all duration {10 if normal else 60}'
 ```
 
@@ -362,18 +351,7 @@ bcmcmd "tc 31; tr 31; tl 31"
 command = 'bcmcmd "tc 50; rcload /alpha/bcm/asic/stark_wh3p_asic_test.script; tl 50"'
 ```
 
-**dut_init** — Must conditionally check gearbox status based on board type. Only RM-4MW-12W-4XE has gearbox hardware. Without the conditional, `show gearbox interface status` returns an error on non-gearbox boards, causing `gearbox_init` to stay False and 4 tests to auto-FAIL:
-```python
-# In dut_init(), replace unconditional gearbox check with:
-if 'gearbox_toml' in Board_INFO()._board_info:
-    self.send_command('show gearbox interface status', self.cli_prompt)
-    gearbox_init_result = self.pexpect_output('before')
-    gearbox_init_fail = re.findall(init_error_pattern, gearbox_init_result)
-    if not gearbox_init_fail:
-        self.gearbox_init = True
-else:
-    self.gearbox_init = True  # No gearbox on this board
-```
+**dut_init** — Uses `show gearbox interface status` (confirmed from stark-diag XML)
 
 ### Step 5: Copy Generic Utilities
 
@@ -427,10 +405,7 @@ Fix `nounset` safety in `rootfs.overlay/etc/profile.d/prompt.sh`:
 
 Edit `linux-*/arch/arm64/configs/alphadiags_defconfig`:
 - Disable `CONFIG_MAGIC_SYSRQ`
-- Disable `CONFIG_PRINTK_TIME` (mfg default is `y` — adds noisy timestamps)
-- Change `CONFIG_CONSOLE_LOGLEVEL_DEFAULT` from `7` to `1`
-- Change `CONFIG_CONSOLE_LOGLEVEL_QUIET` from `4` to `1`
-- Requires `rm -rf build/linux` before rebuild
+- Add `CONFIG_CONSOLE_LOGLEVEL_DEFAULT=1` and `CONFIG_CONSOLE_LOGLEVEL_QUIET=1`
 
 ### Step 14: Modify Buildroot Defconfig
 
@@ -446,36 +421,6 @@ project_name := summit-stark
 ### Step 16: Verify ASIC Test Script Exists
 
 Confirm `rootfs.overlay/alpha/bcm/asic/stark_wh3p_asic_test.script` is present (already in stark-diag).
-
-### Step 17: Wire Up `diag snake_loopback` CLI Command
-
-The snake test C source (`diag_snake.c`) and CLI handler (`CLI_DIAG_Snake_Test` in `cli_diag.c`) already exist in stark-diag but are **not registered** in the CLI. Two files need changes:
-
-**1. Add XML command definition** to `diagnostics/diagk/cli/xml/diag-cmd.xml` (before `</VIEW>`):
-```xml
-<COMMAND name="diag snake_loopback" help="Execute diag snake test">
-    <PARAM name="test" help="Execute diag snake test" mode="subcommand" ptype="SUBCOMMAND">
-        <PARAM name="intf" help="Set test port range" mode="subcommand" ptype="SUBCOMMAND" optional="true">
-            <PARAM name="intflist" help="Interfaces" ptype="INTFSELECTOR" />
-        </PARAM>
-        <PARAM name="duration" help="Set test time duaration" mode="subcommand" ptype="SUBCOMMAND" optional="true">
-            <PARAM name="duration_second" help="Test duration in second" ptype="UINT" default="10"/>
-        </PARAM>
-    </PARAM>
-    <ACTION builtin="CLI_DIAG_Snake_Test">${__full_line}</ACTION>
-</COMMAND>
-```
-
-> **Warning:** Malformed XML (missing attribute quotes) causes the CLI to silently fail to load. Always validate: `python3 -c "import xml.etree.ElementTree as ET; ET.parse('diagnostics/diagk/cli/xml/diag-cmd.xml')"`
-
-**2. Register the CLI function** in `diagnostics/diagk/cli/src/cli_init.c` — add inside `CLISH_PLUGIN_INIT(mfg)`:
-```c
-CLI_ADD_FUNC(CLI_DIAG_Snake_Test);
-```
-
-No Makefile changes needed — both `diag_snake.c` and `cli_diag.c` are already compiled by wildcard patterns.
-
-Requires `rm -rf build/diagk` before rebuild.
 
 ---
 
@@ -499,8 +444,6 @@ Requires `rm -rf build/diagk` before rebuild.
 | MODIFY | `linux-*/arch/arm64/configs/*_defconfig` | Disable MAGIC_SYSRQ, add quiet log levels |
 | MODIFY | `buildroot-fs/configs/*_defconfig` | Remove debug packages |
 | MODIFY | `env.mk` | Update project_name |
-| MODIFY | `diagnostics/diagk/cli/xml/diag-cmd.xml` | Add `diag snake_loopback` command definition |
-| MODIFY | `diagnostics/diagk/cli/src/cli_init.c` | Register `CLI_DIAG_Snake_Test` function |
 | DELETE | `etc/init.d/S91diagenv` | Mfg-only |
 | DELETE | `etc/init.d/S99diagps` | Mfg-only |
 | DELETE | `etc/init.d/S80mount` | Replaced by diagpart |
@@ -523,31 +466,6 @@ bash docker.sh make all -j16
 ```
 
 Without `rm -rf build/diagpy`, the old wheel is repackaged and the fix does not take effect.
-
-### Rebuilding After rootfs.overlay Changes
-
-Files in `rootfs.overlay/` (opdiag script, init, quickstart scripts, configs) are cached in `build/rootfs/`. The overlay is NOT re-applied on subsequent builds unless you clear it:
-
-```bash
-cd ~/project/opdiag/summit-stark
-rm -rf build/rootfs
-bash docker.sh make all -j16
-```
-
-**This is the sneakiest cache.** Unlike diagpy, there is no obvious error — the build succeeds but silently packages the old files. Always verify after rebuild:
-```bash
-grep 'your_change' build/rootfs/alpha/bin/opdiag
-```
-
-### Rebuilding Kernel After Defconfig Changes
-
-Similarly, kernel defconfig changes (e.g., log levels, MAGIC_SYSRQ) require cleaning the kernel build:
-
-```bash
-cd ~/project/opdiag/summit-stark
-rm -rf build/linux
-bash docker.sh make all -j16
-```
 
 ### Testing via Netboot
 
@@ -576,15 +494,13 @@ setenv bootargs console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_interna
 4. **opdiag script**: All test functions handle all 4 board variants
 5. **PoE exclusion**: DIN-8T-8XE (4630R-8T-8XE-DN) removes PoE from test_functions/result_dic at init
 6. **Gearbox**: RM-4MW-12W-4XE loopback_phy_copper properly configures gearbox loopback
-7. **Snake test**: `diag snake_loopback` command works in CLI (Step 17 wiring done), and opdiag sets PHY loopback before running it
-7b. **Internal flash**: Fails on netboot (no `/diagpart` partition) — this is expected. Only passes when booted from flash with a mounted diagnostics partition
-8. **ASIC test**: `stark_wh3p_asic_test.script` path correct in asic0_mem
+7. **ASIC test**: `stark_wh3p_asic_test.script` path correct in asic0_mem
 8. **init**: `prep_opdiag()` present, mdev hotplug removed, alphach moved to 99-opdiag.sh
 9. **Quickstart scripts**: All have `config vlan member delete 1 all` and `config interface loopback all mac`
 10. **prompt.sh**: Uses `KLISH=${KLISH:-}` and quoted `[ -n "$KLISH" ]`
 11. **requirements.txt**: Only `diagpy`, `pyserial`, `pexpect` remain
 12. **Wheel files**: Only `pexpect`, `ptyprocess`, `pyserial`, `smbus2`, `toml` remain
-13. **Kernel defconfig**: `MAGIC_SYSRQ` disabled, `PRINTK_TIME` disabled, `CONSOLE_LOGLEVEL_DEFAULT=1`, `CONSOLE_LOGLEVEL_QUIET=1`
+13. **Kernel defconfig**: `MAGIC_SYSRQ` disabled, `CONSOLE_LOGLEVEL_DEFAULT=1`, `CONSOLE_LOGLEVEL_QUIET=1`
 14. **Buildroot defconfig**: No GDB, strace, stress-ng, valgrind
 
 ---
@@ -600,71 +516,3 @@ setenv bootargs console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_interna
 2. **PoE on DIN-8T-8XE**: Exclude PoE from the test list entirely. Use a conditional approach — remove PoE from `test_functions` and `result_dic` at init time when product is `4630R-8T-8XE-DN`.
 
 3. **rc.soc**: Not needed in rootfs.overlay — it was a mistake in summit-bcma55. The build process copies it to the correct location. Skip it.
-
----
-
-## Appendix: Claude Code Prompt Template
-
-Use this prompt to start a new Claude Code session for deriving opdiag from a new platform. Fill in the `<placeholders>` with your project details.
-
-```
-I need to derive an operational diagnostics image from a manufacturing
-diagnostics project. Follow the derivation guide step by step.
-
-Reference guide: @doc/opdiag-derivation-guide.md
-
-## Source Projects
-
-- Build server: chester@172.31.230.36:~/project/opdiag/
-- Base mfg project: <platform>-diag
-- New opdiag project: summit-<platform>  (to be created)
-- Reference opdiag to copy patterns from: <summit-bcma55 | summit-rz>
-  (bcma55 = single-board BCM/ttyS0, rz = multi-board Renesas/ttySC0)
-
-## Board Info
-
-| Board | Short Name | EEPROM Product Name | Copper Ports | Fiber/SFP Ports | Uplink | PoE | Gearbox |
-|-------|-----------|-------------------|-------------|----------------|--------|-----|---------|
-| board-0 | <name> | <product> | <ports> | <ports> | <ports> | <yes/no> | <yes/no> |
-| board-1 | <name> | <product> | <ports> | <ports> | <ports> | <yes/no> | <yes/no> |
-
-- Console port: <e.g. /dev/ttyS0, /dev/ttySC0>
-- ASIC test script: <e.g. /alpha/bcm/asic/xxx_asic_test.script>
-
-## Hardware Setup (for netboot testing)
-
-- Serial: <COM port>, <baud> baud
-- U-Boot prompt: <e.g. u-boot>, Marvell>>
-- Linux prompt: <e.g. alphadiags:/#>
-- Netboot IPs: host <x.x.x.x>, device <x.x.x.x>
-- Load address: <e.g. 0x70000000>
-- Power outlet: <outlet number>
-
-## Instructions
-
-1. SSH into the build server and create the new project:
-   cp -r <platform>-diag summit-<platform>
-2. Apply all changes from the derivation guide (Part 2, Steps 2–16)
-3. Build: bash docker.sh make all -j16
-4. Use /devloop to netboot and test — iterate until the image boots
-   cleanly and opdiag runs to completion
-5. Expected clean output after "Starting kernel ...":
-   - No kernel messages (LOGLEVEL=1)
-   - "Initializing operational diagnostics..."
-   - "Running Power On Self Test...(Normal mode)"
-   - Test results table
-   - "Diagnostics completed."
-
-Use opdiag_debug_for_internal_use in bootargs if you need to see
-hidden errors. Remove it once everything works.
-```
-
-### Checklist Before Starting
-
-- [ ] Build server SSH access works (`ssh chester@172.31.230.36`)
-- [ ] Base mfg project exists on server and builds cleanly
-- [ ] Reference opdiag project exists for copying patterns (opdiag script, 99-opdiag.sh, diagpart, pldwdtd)
-- [ ] Board EEPROM product names are known (read via `diag system eeprom show` on mfg image)
-- [ ] Port layout per board is known (check PFE TOML files in `rootfs.overlay/alpha/toml/<board>/pfe.toml`)
-- [ ] Device is connected: serial cable, Ethernet for TFTP, power PDU
-- [ ] `/devloop` skill is available for the build-test cycle
