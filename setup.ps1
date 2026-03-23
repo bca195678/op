@@ -30,7 +30,7 @@ wt -w 0 split-pane -V --title "Pane 2" --colorScheme "Vintage" -d "$cwd"
 Start-Sleep -Milliseconds 200
 
 # Pane 3 (bottom-left, SSH): move to Pane 1, split horizontally
-wt -w 0 move-focus left `; split-pane -H --title "Pane 3 (SSH)" --colorScheme "Campbell Powershell" -d "$cwd" powershell -NoExit -Command "ssh chester@172.19.176.168"
+wt -w 0 move-focus left `; split-pane -H --title "Pane 3 (SSH)" --colorScheme "Campbell Powershell" -d "$cwd" powershell -NoExit -Command "ssh chester@172.31.230.36"
 Start-Sleep -Milliseconds 200
 
 # Pane 4 (bottom-right): move to Pane 2, split horizontally
