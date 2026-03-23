@@ -70,6 +70,12 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
   --logfile ./tmp/netboot.log
 ```
 
+> **Operational diag images (summit-\*)** require `opdiag_mode=normal` in bootargs:
+> ```bash
+> --command "setenv bootargs 'console=ttyS0,115200 opdiag_mode=normal'; setenv ipaddr 30.0.0.100; setenv serverip 30.0.0.1"
+> ```
+> Without this parameter, the image will print `"Running Power On Self Test...(Unknown mode)"` and reboot immediately. Valid values: `normal`, `extended`. Manufacturing images (stark-diag) do not need this parameter.
+
 ### 4. TFTP Download + Boot
 
 Use the `$IMAGE` variable discovered in Step 1:
@@ -136,3 +142,4 @@ Expected boot sequence:
 | `Could not find configuration node` | Wrong FIT config name | Omit `#config` to use default, or check with `iminfo 0x70000000` |
 | TFTP transfer starts but stalls | TFTP server timeout expired | Restart server with longer `--timeout` |
 | Linux prompt never appears | Boot failure mid-way | Add `--raw` flag to see full console output |
+| `Running Power On Self Test...(Unknown mode)` then reboot | Missing `opdiag_mode` bootarg | Add `opdiag_mode=normal` to bootargs (required for summit-* opdiag images) |
