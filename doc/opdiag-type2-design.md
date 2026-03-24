@@ -1,4 +1,4 @@
-# opdiag-with-fjord-type2: Per-Family Architecture Design
+# opdiag-with-fjord-type2: Per-Family Architecture
 
 **Date:** 2026-03-24
 **Branch:** `opdiag-with-fjord-type2` (from `opdiag`)
@@ -6,7 +6,7 @@
 
 ---
 
-## Background
+## 1. Background
 
 The `opdiag` branch supports 4 Stark SKUs. The `opdiag-with-fjord-type1` branch added Fjord (5320-16P-2MXT-2X) support by inserting `if self.product_name == '5320-16P-2XT-2X'` branches throughout the monolithic codebase — 7 patches touching `opdiag`, `board.toml`, `opdiag.toml`, plus new hardware config files.
 
@@ -14,11 +14,7 @@ The `opdiag` branch supports 4 Stark SKUs. The `opdiag-with-fjord-type1` branch 
 
 **Type2 goal:** Full per-family isolation. Separate diagpy wheels, separate diagk plugins, separate opdiag scripts. Changes to one family never touch another family's code. A single built image contains all families; boot-time detection selects the correct set.
 
----
-
-## System Components Overview
-
-The diagnostic system has three main components:
+### System Components
 
 | Component | Language | What it is | Size |
 |-----------|----------|------------|------|
@@ -26,14 +22,7 @@ The diagnostic system has three main components:
 | **diagpy** | Python | Diagnostics wheel package — board init, TOML-driven config, installed at boot via init script. | ~few KB wheel |
 | **opdiag** | Python | Operational diagnostics script — `OpdiagHelper` base class + `OpdiagCustom` with test methods (loopback, snake, ASIC, PoE, etc.). | ~1000 lines |
 
-### Current Boot Sequence (type1)
-
-1. `S01pywhl` — pip installs all wheels from `/alpha/whl/`
-2. `S10boardid` — reads board ID from I2C (bus 0, addr 0x38, reg 0x00), writes to `/tmp/board_id`
-3. User runs `cli` — Klish loads `clish_plugin_mfg.so` from `xml/startup.xml`
-4. User runs `opdiag` — Python script with runtime branching per product name
-
-### Current Board Inventory
+### Board Inventory
 
 | Board ID | Product Name | Family | Gearbox | PoE |
 |----------|-------------|--------|---------|-----|
@@ -45,7 +34,145 @@ The diagnostic system has three main components:
 
 ---
 
-## Design Decisions
+## 2. Architecture Overview
+
+```
++============================================================================+
+|                         SINGLE BUILT IMAGE                                  |
+|                      summit-stark.0.0.2-b6                                  |
+|                                                                             |
+|  +------------------+    +------------------+    +---------------------+    |
+|  |   STARK Family   |    |   FJORD Family   |    |      SHARED         |    |
+|  |                  |    |                  |    |                     |    |
+|  | clish_plugin_    |    | clish_plugin_    |    | board.toml          |    |
+|  |   mfg_stark.so   |    |   mfg_fjord.so   |    | family_detect       |    |
+|  |   (110 MB)       |    |   (110 MB)       |    | board_id_get        |    |
+|  |                  |    |                  |    |                     |    |
+|  | whl/stark/       |    | whl/fjord/       |    | whl/ (common)       |    |
+|  |   diagpy-*.whl   |    |   diagpy-*.whl   |    |   pyserial, toml,   |    |
+|  |                  |    |                  |    |   pexpect, smbus2   |    |
+|  | xml-stark/       |    | xml-fjord/       |    |                     |    |
+|  |   startup.xml    |    |   startup.xml    |    | S01boardid          |    |
+|  |                  |    |                  |    | S02pywhl            |    |
+|  | cli-stark        |    | cli-fjord        |    | cli (dispatcher)    |    |
+|  | opdiag-stark     |    | opdiag-fjord     |    | opdiag (dispatcher) |    |
+|  | opdiag-stark.toml|    | opdiag-fjord.toml|    |                     |    |
+|  +------------------+    +------------------+    +---------------------+    |
++============================================================================+
+```
+
+### Architecture Summary
+
+| Component | Approach | Image Contents |
+|-----------|----------|----------------|
+| diagk | Per-family .so, static SDK in each | `clish_plugin_mfg_stark.so` + `clish_plugin_mfg_fjord.so` |
+| diagpy | Independent wheels, same namespace | `whl/stark/diagpy-*.whl` + `whl/fjord/diagpy-*.whl` |
+| opdiag | Per-family scripts + dispatcher | `opdiag` -> `opdiag-stark` or `opdiag-fjord` |
+| CLI | Per-family Klish XML + dispatcher | `cli` -> `cli-stark` or `cli-fjord` |
+| Family detect | Board ID range -> family name | `family_detect` shell script |
+| Boot order | Board ID first, then family-aware wheel install | `S01boardid` -> `S02pywhl` |
+
+---
+
+## 3. Boot Sequence
+
+```
+ POWER ON
+    |
+    v
++-------------------------------------------+
+| S01boardid                                |
+|                                           |
+|  board_id_get --export (retry up to 10x)  |
+|       |                                   |
+|       v                                   |
+|  /tmp/board_id  (e.g. "0x00")            |
+|       |                                   |
+|  family_detect                            |
+|       |                                   |
+|       +-- 0x00..0x0B --> "stark"          |
+|       +-- 0x0C..0x1F --> "fjord"          |
+|       +-- otherwise  --> "unknown"        |
+|       |                                   |
+|       v                                   |
+|  /tmp/board_family  (e.g. "stark")        |
++-------------------------------------------+
+    |
+    v
++-------------------------------------------+
+| S02pywhl                                  |
+|                                           |
+|  FAMILY = cat /tmp/board_family           |
+|  if FAMILY == "unknown": FAMILY = "stark" |
+|                                           |
+|  pip install                              |
+|    --find-links /alpha/whl/$FAMILY        |  <-- family-specific diagpy
+|    --find-links /alpha/whl                |  <-- common wheels
+|    -r /alpha/whl/requirements.txt         |
++-------------------------------------------+
+    |
+    v
++-------------------------------------------+
+| Shell ready: alphadiags:/#                |
++-------------------------------------------+
+    |
+    |   User runs "cli"
+    v
++-------------------------------------------+
+| cli (dispatcher)                          |
+|                                           |
+|  FAMILY = cat /tmp/board_family           |
+|  exec cli-$FAMILY                         |
+|       |                                   |
+|       +--[stark]--> cli-stark             |
+|       |              clish -x xml-stark/  |
+|       |              loads plugin_stark.so|
+|       |                                   |
+|       +--[fjord]--> cli-fjord             |
+|                      clish -x xml-fjord/  |
+|                      loads plugin_fjord.so|
++-------------------------------------------+
+    |
+    |   User runs "opdiag" (from CLI or shell)
+    v
++-------------------------------------------+
+| opdiag (dispatcher)                       |
+|                                           |
+|  family = read /tmp/board_family          |
+|  exec opdiag-$family                      |
+|       |                                   |
+|       +--[stark]--> opdiag-stark          |
+|       |              reads opdiag-stark.toml
+|       |              Stark tests only     |
+|       |                                   |
+|       +--[fjord]--> opdiag-fjord          |
+|                      reads opdiag-fjord.toml
+|                      Fjord tests only     |
++-------------------------------------------+
+```
+
+### Board ID to Family Mapping
+
+```
+  Board ID (8-bit, from I2C EEPROM 0x38:0x00)
+  |
+  |  0x00  4630R-8W-4X-DN          --|
+  |  0x01  4630R-8T-8XE-DN           |-- STARK family
+  |  0x02  4630R-24W-8XE-RM          |   (board_id 0x00 - 0x0B)
+  |  0x03  4630R-4MW-12W-4XE-RM   --|
+  |  0x04..0x0B  (reserved)        --|
+  |
+  |  0x0C  5320-16P-2MXT-2X       --|
+  |  0x0D..0x1F  (reserved)          |-- FJORD family
+  |                                --|   (board_id 0x0C - 0x1F)
+  |
+  |  0x20..0x2F  (future family)
+  |  ...
+```
+
+---
+
+## 4. Design Decisions
 
 Four key architectural decisions were evaluated. Each section lists the options considered, trade-offs, and the chosen approach with reasoning.
 
@@ -110,7 +237,7 @@ Two separate wheel source trees: `diagnostics/diagpy-stark/` and `diagnostics/di
 
 A `diagpy-common` wheel with shared code, plus `diagpy-stark` and `diagpy-fjord` with family-specific overrides. More elegant but adds dependency management complexity and import path issues.
 
-**Choice: Option B** — Fully independent packages. The user's stated goal is risk and coverage management: "if I try to make some changes to one series, it won't affect the others." Full independence achieves this directly. The `diagpy` namespace stays the same, so no code changes needed in consumers — only one wheel is installed at boot.
+**Choice: Option B** — Fully independent packages. The goal is risk and coverage management: "if I try to make some changes to one series, it won't affect the others." Full independence achieves this directly. The `diagpy` namespace stays the same, so no code changes needed in consumers — only one wheel is installed at boot.
 
 ---
 
@@ -136,9 +263,9 @@ esac
 #### Option B: Board ID Range Convention (chosen)
 
 Reserve contiguous board_id ranges per family:
-- `0x00–0x0B` = Stark (12 slots)
-- `0x0C–0x1F` = Fjord (20 slots)
-- `0x20–0x2F` = (future family, 16 slots)
+- `0x00-0x0B` = Stark (12 slots)
+- `0x0C-0x1F` = Fjord (20 slots)
+- `0x20-0x2F` = (future family, 16 slots)
 
 ```sh
 if [ "$BOARD_ID_DEC" -ge 0 ] && [ "$BOARD_ID_DEC" -le 11 ]; then echo "stark"
@@ -205,103 +332,126 @@ Each family script has its own `OpdiagCustom` class with only its own test metho
 
 A base `opdiag` that dynamically imports family-specific test modules. More Pythonic but adds import machinery complexity and makes the test flow harder to follow.
 
-**Choice: Option B** — Per-family scripts with thin dispatcher. Matches the full-isolation philosophy. The dispatcher is trivial:
-```sh
-#!/bin/sh
-FAMILY=$(cat /tmp/board_family)
-exec /alpha/bin/opdiag-$FAMILY "$@"
+**Choice: Option B** — Per-family scripts with thin dispatcher. Matches the full-isolation philosophy.
+
+---
+
+## 5. Source Repository Structure
+
+```
+stark-diag/
+|
++-- Makefile                          # all: diagk-stark diagk-fjord
+|                                     #      diagpy-stark diagpy-fjord
++-- env.mk                           #      oom zlflasher -> image
+|
++-- diagnostics/
+|   +-- diagk-stark/                  # C source: Stark Klish plugin
+|   |   +-- board/  common/  cli/     #   7 modules, Stark-specific code
+|   |   +-- diag/  pfe/  gearbox/    #   LED: din-*, rm-* variants
+|   |   +-- system/                   #   Builds -> clish_plugin_mfg_stark.so
+|   |   +-- Makefile
+|   |
+|   +-- diagk-fjord/                  # C source: Fjord Klish plugin
+|   |   +-- board/  common/  cli/     #   7 modules, Fjord-specific code
+|   |   +-- diag/  pfe/  gearbox/    #   LED: 16p-2mxt-2x only
+|   |   +-- system/                   #   Builds -> clish_plugin_mfg_fjord.so
+|   |   +-- Makefile
+|   |
+|   +-- diagpy-stark/                 # Python wheel: Stark diagpy
+|   |   +-- diagpy/                   #   Same 'diagpy' namespace
+|   |   +-- setup.py                  #   Installed at boot for Stark boards
+|   |
+|   +-- diagpy-fjord/                 # Python wheel: Fjord diagpy
+|       +-- diagpy/                   #   Same 'diagpy' namespace
+|       +-- setup.py                  #   Installed at boot for Fjord boards
+|
++-- rootfs.overlay/
+    +-- alpha/
+    |   +-- bin/
+    |   |   +-- family_detect         # board_id range -> family name
+    |   |   +-- cli                   # Dispatcher -> cli-stark | cli-fjord
+    |   |   +-- opdiag                # Dispatcher -> opdiag-stark | opdiag-fjord
+    |   |   +-- opdiag-stark          # Stark-only test script
+    |   |   +-- opdiag-fjord          # Fjord-only test script
+    |   |
+    |   +-- lib/module/
+    |   |   +-- clish_plugin_mfg_stark.so   # ~110 MB
+    |   |   +-- clish_plugin_mfg_fjord.so   # ~110 MB
+    |   |
+    |   +-- xml-stark/                # Stark Klish XML
+    |   |   +-- startup.xml           #   -> plugin_mfg_stark.so
+    |   |
+    |   +-- xml-fjord/                # Fjord Klish XML
+    |   |   +-- startup.xml           #   -> plugin_mfg_fjord.so
+    |   |
+    |   +-- whl/
+    |   |   +-- stark/diagpy-*.whl    # Stark diagpy wheel
+    |   |   +-- fjord/diagpy-*.whl    # Fjord diagpy wheel
+    |   |   +-- pyserial-*.whl        # Common wheels
+    |   |   +-- toml-*.whl
+    |   |   +-- ...
+    |   |   +-- requirements.txt
+    |   |
+    |   +-- toml/
+    |       +-- board.toml            # All boards, all families
+    |       +-- opdiag-stark.toml     # Stark cli_prompt regex
+    |       +-- opdiag-fjord.toml     # Fjord cli_prompt regex
+    |       +-- pfe-*.toml            # Per-board hardware configs
+    |       +-- gearbox-*.toml
+    |       +-- i2c-*.toml
+    |       +-- xcvr-*.toml
+    |       +-- poe-*.toml
+    |
+    +-- etc/init.d/
+        +-- S01boardid                # Board ID + family detection
+        +-- S02pywhl                  # Family-aware wheel install
 ```
 
 ---
 
-## Chosen Architecture Summary
-
-| Component | Approach | Image Contents |
-|-----------|----------|----------------|
-| diagk | Per-family .so, static SDK in each | `clish_plugin_mfg_stark.so` + `clish_plugin_mfg_fjord.so` |
-| diagpy | Independent wheels, same namespace | `whl/stark/diagpy-*.whl` + `whl/fjord/diagpy-*.whl` |
-| opdiag | Per-family scripts + dispatcher | `opdiag` → `opdiag-stark` or `opdiag-fjord` |
-| CLI | Per-family Klish XML + dispatcher | `cli` → `cli-stark` or `cli-fjord` |
-| Family detect | Board ID range → family name | `family_detect` shell script |
-| Boot order | Board ID first, then family-aware wheel install | `S01boardid` → `S02pywhl` |
-
----
-
-## Target Repository Structure
+## 6. Build Flow
 
 ```
-diagnostics/
-  diagk-stark/          # Stark diagk source (full copy, Stark LED code only)
-  diagk-fjord/          # Fjord diagk source (from summit-bcma55, Fjord LED code)
-  diagpy-stark/         # Stark diagpy wheel source
-  diagpy-fjord/         # Fjord diagpy wheel source
-  (diagk/ and diagpy/ removed)
-
-rootfs.overlay/
-  alpha/bin/
-    family_detect       # NEW: board_id range -> family name
-    cli                 # Modified: dispatcher -> cli-stark or cli-fjord
-    cli-stark           # run_klish.sh for Stark (xml-stark/)
-    cli-fjord           # run_klish.sh for Fjord (xml-fjord/)
-    opdiag              # Modified: dispatcher -> opdiag-stark or opdiag-fjord
-    opdiag-stark        # Stark-only opdiag (no Fjord branches)
-    opdiag-fjord        # Fjord-only opdiag (no Stark branches)
-  alpha/lib/module/
-    clish_plugin_mfg_stark.so   # Stark diagk plugin (~110MB)
-    clish_plugin_mfg_fjord.so   # Fjord diagk plugin (~110MB)
-  alpha/xml-stark/      # Stark Klish XML (startup.xml -> plugin_mfg_stark.so)
-  alpha/xml-fjord/      # Fjord Klish XML (startup.xml -> plugin_mfg_fjord.so)
-  alpha/whl/
-    stark/diagpy-*.whl  # Stark diagpy wheel
-    fjord/diagpy-*.whl  # Fjord diagpy wheel
-    (common wheels: pyserial, pexpect, toml, smbus2, etc.)
-  alpha/toml/
-    board.toml          # Unified - all boards, all families
-    opdiag-stark.toml   # Stark cli_prompt regex
-    opdiag-fjord.toml   # Fjord cli_prompt regex
-  etc/init.d/
-    S01boardid          # Renamed from S10 - runs BEFORE wheel install
-    S02pywhl            # Renamed from S01 - family-aware wheel install
+                          make all -j16
+                               |
+            +------------------+------------------+
+            |                  |                  |
+            v                  v                  v
+        +-------+         +-------+          +--------+
+        |  sdk  |         |  sdk  |          | rootfs |
+        | (once)|         | (once)|          | .diag  |
+        +---+---+         +---+---+          +---+----+
+            |                  |                  |
+     +------+------+    +-----+------+     +-----+-----+
+     |             |    |            |     |           |
+     v             v    v            v     v           v
+ diagk-stark  diagk-fjord  diagpy-stark  diagpy-fjord  oom  zlflasher
+     |             |         |            |             |      |
+     v             v         v            v             v      v
+ plugin_       plugin_    whl/stark/   whl/fjord/    whl/   alpha/bin/
+ stark.so      fjord.so   diagpy.whl   diagpy.whl   oom.whl  zlflasher
+     |             |         |            |             |      |
+     +------+------+---------+-----+------+------+------+------+
+            |                      |                    |
+            v                      v                    v
+     alpha/lib/module/       alpha/whl/            alpha/bin/
+                                   |
+                                   v
+                           +---------------+
+                           |    image      |
+                           | (cpio+kernel  |
+                           |  +mkimage)    |
+                           +-------+-------+
+                                   |
+                                   v
+                           summit-stark.0.0.2-b6
+                              (60 MB FIT image)
 ```
 
 ---
 
-## Boot Sequence (type2)
-
-```
-Power On
-  |
-  v
-S01boardid
-  |- board_id_get --export -> /tmp/board_id   (e.g. "0x00")
-  |- family_detect -> /tmp/board_family        (e.g. "stark")
-  |
-  v
-S02pywhl
-  |- reads /tmp/board_family
-  |- pip install whl/<family>/diagpy-*.whl     (family-specific)
-  |- pip install whl/*.whl                     (common: pyserial, pexpect, toml, smbus2)
-  |
-  v
-Shell ready (alphadiags:/#)
-  |
-  v
-User runs "cli"
-  |- reads /tmp/board_family
-  |- exec cli-<family>
-  |- Klish loads xml-<family>/startup.xml
-  |- Plugin: clish_plugin_mfg_<family>.so
-  |
-  v
-User runs "opdiag" (from Klish CLI or shell)
-  |- reads /tmp/board_family
-  |- exec opdiag-<family>
-  |- Family-specific tests only
-```
-
----
-
-## Implementation Steps
+## 7. Implementation Steps
 
 ### Step 0: Create Branch
 ```
@@ -377,13 +527,15 @@ Copy from `summit-bcma55` (same as type1):
 - Add `[board-12]` entry to `board.toml` (with `opdiag_toml = opdiag-fjord.toml`)
 
 ### Step 9: Build and Test
-- Full clean build: `bash docker.sh make clean all -j16`
+- Build: `bash docker.sh make all -j16`
 - Verify image contains both plugins, both wheels, all dispatchers
 - Netboot on Stark DUT (DIN-8W-4X): confirm `board_family=stark`, correct wheel, correct plugin, 9/10 PASS
 
 ---
 
-## Critical Files to Modify
+## 8. Files Changed
+
+### Modified Files
 
 | File | Change |
 |------|--------|
@@ -396,7 +548,7 @@ Copy from `summit-bcma55` (same as type1):
 | `diagnostics/diagk/cli/xml/startup.xml` | Per-family copies with renamed .so |
 | `rootfs.overlay/alpha/toml/board.toml` | Add board-12, update opdiag_toml paths |
 
-## New Files
+### New Files
 
 | File | Purpose |
 |------|---------|
@@ -410,22 +562,31 @@ Copy from `summit-bcma55` (same as type1):
 
 ---
 
-## Extensibility
+## 9. Extensibility
 
 Adding a 3rd family (e.g. "alpine", board_id 0x20-0x2F):
 
-1. Add range to `family_detect`
-2. Create `diagnostics/diagk-alpine/` and `diagnostics/diagpy-alpine/`
-3. Add `diagk-alpine` / `diagpy-alpine` Makefile targets
-4. Add `cli-alpine`, `xml-alpine/`, `opdiag-alpine`, `opdiag-alpine.toml`
-5. Add `whl/alpine/` with built wheel
-6. Add board entries to `board.toml`
+```
+  1. family_detect:  add range 0x20-0x2F -> "alpine"
 
-**No existing family code is touched.**
+  2. Source:          diagnostics/diagk-alpine/    (from reference repo)
+                     diagnostics/diagpy-alpine/   (copy + customize)
+
+  3. Makefile:        add diagk-alpine, diagpy-alpine targets
+                     all: ... diagk-alpine diagpy-alpine ...
+
+  4. Runtime:         cli-alpine, xml-alpine/, opdiag-alpine, opdiag-alpine.toml
+
+  5. Wheels:          whl/alpine/diagpy-*.whl
+
+  6. board.toml:      add [board-N] entries with opdiag_toml = opdiag-alpine.toml
+
+  NO EXISTING FAMILY CODE IS TOUCHED.
+```
 
 ---
 
-## Type1 vs Type2 Comparison
+## 10. Type1 vs Type2 Comparison
 
 | Aspect | Type1 (branch-based) | Type2 (per-family) |
 |--------|---------------------|-------------------|
