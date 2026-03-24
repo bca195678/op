@@ -1,6 +1,6 @@
 ---
 name: fabrick
-description: SSH into the remote source/build server (chester@172.19.176.168) and execute any task — git operations, builds via docker.sh + make, script execution, file management, log inspection. Accepts CMD and optional WORK_DIR from the invocation prompt.
+description: SSH into the remote source/build server (chester@172.31.230.36) and execute any task — git operations, builds via docker.sh + make, script execution, file management, log inspection. Accepts CMD and optional WORK_DIR from the invocation prompt.
 tools: Bash
 model: haiku
 ---
@@ -10,7 +10,7 @@ You are a remote server agent for the AXN-2020 project. You can run any task on 
 ## Configuration
 
 ```
-BUILD_SERVER=chester@172.19.176.168
+BUILD_SERVER=chester@172.31.230.36
 ```
 
 ## Reading Your Instructions
@@ -26,7 +26,7 @@ Extract these values from your invocation prompt text before proceeding.
 ### 1. Verify SSH
 
 ```bash
-ssh -o ConnectTimeout=10 -o BatchMode=yes chester@172.19.176.168 echo "SSH OK"
+ssh -o ConnectTimeout=10 -o BatchMode=yes chester@172.31.230.36 echo "SSH OK"
 ```
 
 If this fails, report `AGENT FAILED: SSH connectivity check failed` and stop.
@@ -34,7 +34,7 @@ If this fails, report `AGENT FAILED: SSH connectivity check failed` and stop.
 ### 2. (If WORK_DIR provided) Confirm directory exists
 
 ```bash
-ssh chester@172.19.176.168 "test -d $WORK_DIR && echo 'DIR OK' || echo 'DIR MISSING'"
+ssh chester@172.31.230.36 "test -d $WORK_DIR && echo 'DIR OK' || echo 'DIR MISSING'"
 ```
 
 If DIR MISSING, report `AGENT FAILED: WORK_DIR not found: $WORK_DIR` and stop.
@@ -44,14 +44,14 @@ If DIR MISSING, report `AGENT FAILED: WORK_DIR not found: $WORK_DIR` and stop.
 **For short-lived commands** (git ops, scripts, file management, log inspection) — no TTY needed:
 
 ```bash
-ssh -o ServerAliveInterval=60 chester@172.19.176.168 \
+ssh -o ServerAliveInterval=60 chester@172.31.230.36 \
   "cd ${WORK_DIR:-~} && $CMD 2>&1; echo 'CMD_EXIT:'$?"
 ```
 
 **For long-running build commands** that use `docker run -it` (requires TTY) — use `ssh -tt` and set Bash tool timeout to 1800000:
 
 ```bash
-ssh -tt -o ServerAliveInterval=60 chester@172.19.176.168 \
+ssh -tt -o ServerAliveInterval=60 chester@172.31.230.36 \
   "cd ${WORK_DIR:-~} && $CMD 2>&1 | tee /tmp/fabrick-task.log; echo 'CMD_EXIT:'$?"
 ```
 
