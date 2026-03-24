@@ -76,6 +76,14 @@ All host-side logs, downloaded images, spec checkouts, and other transient files
 
 Always ask for explicit permission before running `git commit` or `git push`. Never bundle them into the end of an implementation step — completing a task does not imply approval to commit or push.
 
+All commits (both local and on the remote build server) must use this author:
+
+```
+Chester Cheng <chester_cheng@alphanetworks.com>
+```
+
+Pass it explicitly on every commit: `git commit --author='Chester Cheng <chester_cheng@alphanetworks.com>' ...`
+
 ## Architecture
 
 ### Serial Helper
