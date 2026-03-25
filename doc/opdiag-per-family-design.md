@@ -1,7 +1,11 @@
-# opdiag-with-fjord-type2: Per-Family Architecture
+# Per-Family Architecture for Fjord Support
 
-**Date:** 2026-03-24
-**Branch:** `opdiag-with-fjord-type2` (from `opdiag`)
+**Date:** 2026-03-24 (updated 2026-03-25)
+**Branches:**
+- `opdiag-with-fjord-type1` — monolithic (if/elif in shared codebase)
+- `opdiag-with-fjord-type2` — per-family, static SDK linking **(recommended)**
+- `opdiag-with-fjord-type3` — per-family, dynamic SDK linking via `libsdk_bcm.so`
+
 **Build server:** `chester@172.31.230.36`, working dir: `~/project/opdiag/stark-diag`
 
 ---
@@ -13,6 +17,8 @@ The `opdiag` branch supports 4 Stark SKUs. The `opdiag-with-fjord-type1` branch 
 **Problem with type1:** Every family's code lives in the same files. A change for one family risks breaking another. As more families are added (3rd, 4th, ...), the branching becomes unmaintainable and testing coverage explodes.
 
 **Type2 goal:** Full per-family isolation. Separate diagpy wheels, separate diagk plugins, separate opdiag scripts. Changes to one family never touch another family's code. A single built image contains all families; boot-time detection selects the correct set.
+
+**Type3 extension:** Same per-family isolation as type2, but extracts the Broadcom SDK into a shared `libsdk_bcm.so` (~110MB). Each family plugin links dynamically (~300KB each), recovering the image size back to type1 levels (~45MB). Trade-off: adds dynamic linking complexity (`sdk_shared.mk`, `-rpath`, `dlopen()` resolution).
 
 ### System Components
 
@@ -201,11 +207,34 @@ Each family gets its own plugin: `clish_plugin_mfg_stark.so` (~110MB) and `clish
 | Clean per-family source trees (`diagk-stark/`, `diagk-fjord/`) | |
 | Adding a 3rd family = add `diagk-alpine/`, no existing code touched | |
 
-#### Option C: Shared SDK .so + Thin Family .so (not explored — too complex)
+#### Option C: Shared SDK .so + Thin Family .so (type3 — explored and proven)
 
-Factor SDK into a shared `libsdk.so`, each family links only its own code. Requires SDK to be built as position-independent code (PIC), adds runtime dependency management, and the SDK was not designed for shared linking.
+Factor the SDK into a shared `libsdk_bcm.so`, each family plugin links only its own `app.a` statically and references the SDK dynamically via `-lsdk_bcm -Wl,-rpath,/alpha/lib/module`.
 
-**Choice: Option B** — Accept the ~110MB duplication per family. Image size is not a constraint (NOR flash has room), and complete build/source isolation is the primary goal. The SDK is built once and linked into each family independently.
+| Pros | Cons |
+|------|------|
+| Image size same as type1 (~45MB vs ~60MB for type2) | Additional build step (`sdk_shared.mk`) |
+| Scales to N families with zero SDK size growth | Runtime dependency: `libsdk_bcm.so` must exist at load path |
+| Plugins are ~300KB each (only app code) | Harder to debug (symbol resolution at `dlopen()` time) |
+| | `-rpath` must match install path exactly |
+
+**Implementation (branch `opdiag-with-fjord-type3`):**
+- New `sdk_shared.mk`: builds `libsdk_bcm.so` from all SDK `.a`/`.o` with `--whole-archive`, then strips (290MB unstripped -> 110MB stripped)
+- `module.mk`: `LIBS_STATIC = $(APP_LIB)`, `SDK_SHARED_LINK = -L$(build_dir) -lsdk_bcm -Wl,-rpath,/alpha/lib/module`, `LIBS_DYNAMIC = $(SDK_SHARED_LINK) $(KLISH_LIB)`
+- `image/Makefile` runtime: `--whole-archive` for `LIBS_STATIC` only, `LIBS_DYNAMIC` linked normally
+- Makefile: `diagk-stark: sdk-shared` (instead of `sdk`)
+
+**Measured results (2026-03-25):**
+
+| Artifact | Type2 (static) | Type3 (dynamic) |
+|----------|---------------|-----------------|
+| `clish_plugin_mfg_stark.so` | 110 MB | 300 KB |
+| `clish_plugin_mfg_fjord.so` | 110 MB | 300 KB |
+| `libsdk_bcm.so` | — | 110 MB |
+| Final image | 60 MB | 45 MB |
+| opdiag test (Stark DUT) | 9/10 PASS | 9/10 PASS |
+
+**Choice: Option B (type2)** — Accept the ~110MB duplication per family. The 15MB image penalty is negligible (~8s extra TFTP transfer), and static linking avoids runtime surprises. Type3 is a proven migration path if image size becomes a constraint at 4-5+ families.
 
 ---
 
@@ -449,6 +478,52 @@ stark-diag/
                               (60 MB FIT image)
 ```
 
+### Type3 Build Flow Variant
+
+Type3 inserts an `sdk-shared` step between `sdk` and `diagk-*`. The SDK is linked into `libsdk_bcm.so` once; each family plugin links against it dynamically.
+
+```
+                          make all -j16
+                               |
+                        +------+------+
+                        |             |
+                        v             v
+                    +-------+    +--------+
+                    |  sdk  |    | rootfs |
+                    | (once)|    | .diag  |
+                    +---+---+    +--------+
+                        |
+                        v
+                  +------------+
+                  | sdk-shared |   <-- NEW: builds libsdk_bcm.so (110 MB)
+                  +-----+------+
+                        |
+              +---------+---------+
+              |                   |
+              v                   v
+         diagk-stark         diagk-fjord        (each ~300 KB, links -lsdk_bcm)
+              |                   |
+              v                   v
+         plugin_stark.so     plugin_fjord.so
+              |                   |
+              +---+---+-----------+
+                  |   |
+                  v   v
+           alpha/lib/module/
+           +-- libsdk_bcm.so            (110 MB, shared)
+           +-- clish_plugin_mfg_stark.so (300 KB)
+           +-- clish_plugin_mfg_fjord.so (300 KB)
+                        |
+                        v
+                summit-stark.0.0.2-b6
+                   (45 MB FIT image)
+```
+
+**Key type3 build files:**
+- `sdk_shared.mk` — builds and strips `libsdk_bcm.so`
+- `module.mk` — `LIBS_STATIC` + `LIBS_DYNAMIC` replacing `LIBS`
+- `image/Makefile` — `--whole-archive` for app only, dynamic SDK link
+
 ---
 
 ## 7. Implementation Steps
@@ -586,14 +661,44 @@ Adding a 3rd family (e.g. "alpine", board_id 0x20-0x2F):
 
 ---
 
-## 10. Type1 vs Type2 Comparison
+## 10. Type1 vs Type2 vs Type3 Comparison
 
-| Aspect | Type1 (branch-based) | Type2 (per-family) |
-|--------|---------------------|-------------------|
-| Code isolation | None — all families in same files | Complete — separate source trees |
-| Risk of regression | High — Fjord change can break Stark | None — families never share code |
-| Image size | ~110MB (one plugin) | ~220MB (two plugins) |
-| Build time | Single build | SDK once + 2 link passes (~2 min extra) |
-| Adding a new family | Patch every file with new branches | Add new directories + Makefile targets |
-| Testing scope | Must test all families on every change | Only test the changed family |
-| Complexity | Low initial, grows with families | Higher initial, stays flat |
+| | **Type1** | **Type2** | **Type3** |
+|---|---|---|---|
+| **Branch** | `opdiag-with-fjord-type1` | `opdiag-with-fjord-type2` | `opdiag-with-fjord-type3` |
+| **Approach** | Monolithic — if/elif in shared codebase | Per-family isolation, static SDK | Per-family isolation, dynamic SDK |
+| **diagk** | Single `diagnostics/diagk/` with conditionals | `diagk-stark/` + `diagk-fjord/` (independent) | Same as type2 |
+| **diagpy** | Single `diagnostics/diagpy/` with conditionals | `diagpy-stark/` + `diagpy-fjord/` (independent) | Same as type2 |
+| **SDK linking** | Static, one plugin | Static per family (~110MB each) | Dynamic — `libsdk_bcm.so` shared (~110MB once) |
+| **Plugin size** | ~110MB x 1 | ~110MB x 2 | ~300KB x 2 + 110MB shared lib |
+| **Image size** | ~45MB | ~60MB | ~45MB |
+| **Adding a family** | Add more if/elif branches everywhere | Add new directories, no existing code touched | Same as type2 |
+| **Risk** | Fjord change can break Stark | Fully isolated — zero cross-family risk | Same isolation, but shared SDK is a single point |
+| **Build complexity** | Low (one codebase) | Medium (duplicated source trees) | Higher (sdk_shared.mk, rpath, dynamic linking) |
+| **Debug complexity** | Low | Low (static = what you see is what you get) | Higher (dlopen symbol resolution) |
+| **Boot-time selection** | Code branches on board ID at runtime | `family_detect` dispatchers pick per-family binaries | Same as type2 |
+| **opdiag test (Stark)** | 9/10 PASS | 9/10 PASS | 9/10 PASS |
+
+---
+
+## 11. Recommendation
+
+**Use type2. Keep type3 as a known migration path.**
+
+**Type1 is a trap.** It feels simple with 2 families, but the if/elif branches grow fast — every function touching hardware needs a family check, every code review needs "did this Stark fix break Fjord?", and every CI run must test all families. With 42 differing files in diagk alone, a 3rd family would make the codebase painful.
+
+**Type2 is the right default.** Full isolation means a Fjord developer can't accidentally break Stark, adding a family is purely additive, and each family can diverge when needed. Static linking = no runtime surprises. The 15MB image penalty (60MB vs 45MB) is ~8 extra seconds of TFTP transfer on a 2GB DRAM platform.
+
+**Type3 is premature optimization.** The `sdk_shared.mk`, `-rpath`, and `dlopen()` resolution add build and debug surface that doesn't pay for itself at 2 families. The break-even point is ~4-5 families where the image would otherwise exceed 100MB. When that happens, the type2-to-type3 migration is mechanical — swap `LIBS` for `LIBS_STATIC`/`LIBS_DYNAMIC` and add `sdk_shared.mk`.
+
+---
+
+### 建議（中文摘要）
+
+**建議使用 type2，type3 留作備案。**
+
+- **Type1 是陷阱** — 兩個 family 看似簡單，但 if/elif 分支隨 family 數量快速增長。光是 diagk 就有 42 個檔案不同，第三個 family 會讓程式碼難以維護。
+- **Type2 是正確的預設選擇** — 完全隔離代表改一個 family 不可能影響另一個。靜態連結不會有執行期意外。Image 多 15MB 代價很低（TFTP 多傳約 8 秒）。
+- **Type3 是過早優化** — `sdk_shared.mk`、`-rpath`、`dlopen()` 在只有 2 個 family 時還不划算。損益平衡點約在 4-5 個 family，屆時從 type2 遷移到 type3 是機械式操作。
+
+**總結：Type2 用約 15MB 換取簡潔性和完全隔離，對嵌入式診斷系統而言是划算的交易。**
