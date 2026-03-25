@@ -442,40 +442,40 @@ stark-diag/
 ## 6. Build Flow
 
 ```
-                          make all -j16
-                               |
-            +------------------+------------------+
-            |                  |                  |
-            v                  v                  v
-        +-------+         +-------+          +--------+
-        |  sdk  |         |  sdk  |          | rootfs |
-        | (once)|         | (once)|          | .diag  |
-        +---+---+         +---+---+          +---+----+
-            |                  |                  |
-     +------+------+    +-----+------+     +-----+-----+
-     |             |    |            |     |           |
-     v             v    v            v     v           v
- diagk-stark  diagk-fjord  diagpy-stark  diagpy-fjord  oom  zlflasher
-     |             |         |            |             |      |
-     v             v         v            v             v      v
- plugin_       plugin_    whl/stark/   whl/fjord/    whl/   alpha/bin/
- stark.so      fjord.so   diagpy.whl   diagpy.whl   oom.whl  zlflasher
-     |             |         |            |             |      |
-     +------+------+---------+-----+------+------+------+------+
-            |                      |                    |
-            v                      v                    v
-     alpha/lib/module/       alpha/whl/            alpha/bin/
-                                   |
-                                   v
-                           +---------------+
-                           |    image      |
-                           | (cpio+kernel  |
-                           |  +mkimage)    |
-                           +-------+-------+
-                                   |
-                                   v
-                           summit-stark.0.0.2-b6
-                              (60 MB FIT image)
+                                make all -j16
+                                     |
+                  +------------------+------------------+
+                  |                  |                  |
+                  v                  v                  v
+              +-------+         +-------+         +--------+
+              |  sdk  |         |  sdk  |         | rootfs |
+              | (once)|         | (once)|         |  .diag |
+              +---+---+         +---+---+         +---+----+
+                  |                  |                 |
+          +-------+-----+     +-----+------+     +----+------+
+          |             |     |            |     |           |
+          v             v     v            v     v           v
+     diagk-stark  diagk-fjord  diagpy-stark  diagpy-fjord  oom  zlflasher
+          |             |         |              |          |       |
+          v             v         v              v          v       v
+      plugin_       plugin_   whl/stark/    whl/fjord/    whl/  alpha/bin/
+      stark.so      fjord.so  diagpy.whl    diagpy.whl  oom.whl zlflasher
+          |             |         |              |          |       |
+          +------+------+---------+------+-------+-----+---+-------+
+                 |                       |             |
+                 v                       v             v
+          alpha/lib/module/        alpha/whl/      alpha/bin/
+                                         |
+                                         v
+                                 +---------------+
+                                 |     image     |
+                                 | (cpio+kernel  |
+                                 |   +mkimage)   |
+                                 +-------+-------+
+                                         |
+                                         v
+                                summit-stark.0.0.2-b6
+                                   (60 MB FIT image)
 ```
 
 ### Type3 Build Flow Variant
