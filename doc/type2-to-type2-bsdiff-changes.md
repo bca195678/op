@@ -49,25 +49,7 @@ smaller patch file (the delta is computed on the stripped binaries), further red
 
 ---
 
-## 4. `docker.sh` — lld bind-mounts (ICF experiment leftover)
-
-**What changed:**
-- Two `-v` bind-mounts were added to `DOCKER_ARGS`:
-  - `/usr/bin/ld.lld` → toolchain `ld.lld`
-  - `/lib/x86_64-linux-gnu/libLLVM-14.so.1` → toolchain lib path
-
-**Why (context):**
-These mounts were added during an earlier experiment to test ICF (Identical Code Folding) via
-the `lld` linker as an alternative size reduction technique. ICF was ultimately ineffective because
-the two plugins have different relocation encodings for their shared SDK code. The ICF flags were
-removed from the build, but these bind-mounts remained.
-
-**Note:** These lines are not required for the bsdiff approach and can be safely removed before
-merging.
-
----
-
-## 5. `rootfs.overlay/etc/init.d/S01boardid` — Runtime plugin reconstruction
+## 4. `rootfs.overlay/etc/init.d/S01boardid` — Runtime plugin reconstruction
 
 **What changed:**
 - Added logic in the `start)` case to handle the bsdiff patch at boot time:
@@ -82,28 +64,6 @@ The image ships with only `clish_plugin_mfg_stark.so` and the patch. The correct
 running hardware must be present before the CLI starts. `S01boardid` is the earliest init script
 (runs before the CLI), so it is the right place to perform this one-time reconstruction.
 After the script runs, the filesystem contains exactly one plugin binary matching the board family.
-
----
-
-## 6. `rootfs.overlay/init` — Fix `OPDDIAG_DEV` variable typo
-
-**What changed:**
-- Renamed `local OPDDIAG_DEV=` → `local OPDIAG_DEV=` (removed the extra `D`).
-- Changed `local OPDIAG_DEV=1` inside the case statement → `OPDIAG_DEV=1` (removed `local`
-  so the assignment propagates to the outer function scope).
-
-**Why:**
-The original code had two bugs that caused the `opdiag_debug_for_internal_use` kernel parameter
-to be silently ignored:
-1. The outer variable was named `OPDDIAG_DEV` (typo) while the inner check used `OPDIAG_DEV`,
-   so they were always different variables.
-2. The `local` keyword inside the `case` block created a new local variable scoped only to that
-   block; the outer `if [ -n "${OPDIAG_DEV}" ]` test always saw an empty value.
-
-The combined effect: the `else` branch (redirect all I/O to `/dev/null`, disable console) was
-always taken regardless of the kernel command line. This made console debugging impossible.
-The fix restores the intended behaviour so that passing `opdiag_debug_for_internal_use` in
-`bootargs` correctly enables serial console output during boot.
 
 ---
 
