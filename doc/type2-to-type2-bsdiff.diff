@@ -1,16 +1,24 @@
 diff --git a/Makefile b/Makefile
-index 474153c88..8d4885f29 100755
+index 474153c88..f1e0741f0 100755
 --- a/Makefile
 +++ b/Makefile
-@@ -62,7 +62,19 @@ image: simplify_rootfs release_info $(cpio_file)$(rootfs_ext)
- 		&& ls -l \
- 		&& cat $(project_name).$(project_version).md5
+@@ -79,6 +79,26 @@ release_info: rootfs.diag
+ 	@echo export IMAGE_NAME=\"$(project_name).$(project_version)\" >>$(release_tag)
+ 	@chmod a-wx $(release_tag)
 
--$(cpio_file)$(rootfs_ext): simplify_rootfs release_info
-+apply_bsdiff:
+
++host_bsdiff := $(build_dir)/host/bsdiff
++
++$(host_bsdiff): $(buildroot_external_dir)/package/bsdiff/bsdiff.c
++	@mkdir -p $(dir $@)
++	gcc -O2 -I$(buildroot_external_dir)/package/bsdiff \
++		-o $@ $< \
++		-L/usr/lib/x86_64-linux-gnu -l:libbz2.so.1
++
++apply_bsdiff: $(host_bsdiff)
 +	@echo ":: Creating bsdiff patch stark->fjord"
 +	@if [ -f $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so ]; then \
-+		$(HOME)/bin/bsdiff \
++		$(host_bsdiff) \
 +			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_stark.so \
 +			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so \
 +			$(rootfs-temp_dir)/alpha/lib/module/stark_to_fjord.patch; \
@@ -18,35 +26,25 @@ index 474153c88..8d4885f29 100755
 +		echo "Fjord patch created"; \
 +	fi
 +
-+
-+$(cpio_file)$(rootfs_ext): simplify_rootfs release_info apply_bsdiff
- 	@echo "$(build_str)"
- 	@echo "Creating CPIO and compressing..."
- 	@fakeroot -- $(cpio_script) "$(rootfs-temp_dir)" "$(cpio_file)"
-diff --git a/diagnostics/diagk-fjord/image/Makefile b/diagnostics/diagk-fjord/image/Makefile
-index 283f0ba83..2f51217d0 100755
---- a/diagnostics/diagk-fjord/image/Makefile
-+++ b/diagnostics/diagk-fjord/image/Makefile
-@@ -20,6 +20,7 @@ run: runtime
- 	$(OBJCOPY) --only-keep-debug $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME).debug
- 	gzip -f $(O)/$(MODULE_NAME).debug
- 	$(OBJCOPY) --strip-all $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME)
-+	$(OBJCOPY) --remove-section=.eh_frame --remove-section=.eh_frame_hdr --remove-section=.comment $(O)/$(MODULE_NAME)
- 	$(RM) $(O)/$(MODULE_NAME).dbg
-
- runtime:
-diff --git a/diagnostics/diagk-stark/image/Makefile b/diagnostics/diagk-stark/image/Makefile
-index 283f0ba83..2f51217d0 100755
---- a/diagnostics/diagk-stark/image/Makefile
-+++ b/diagnostics/diagk-stark/image/Makefile
-@@ -20,6 +20,7 @@ run: runtime
- 	$(OBJCOPY) --only-keep-debug $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME).debug
- 	gzip -f $(O)/$(MODULE_NAME).debug
- 	$(OBJCOPY) --strip-all $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME)
-+	$(OBJCOPY) --remove-section=.eh_frame --remove-section=.eh_frame_hdr --remove-section=.comment $(O)/$(MODULE_NAME)
- 	$(RM) $(O)/$(MODULE_NAME).dbg
-
- runtime:
+ ##### Remove unused files (headers, static libraries, documentation...)
+ simplify_rootfs: rootfs.diag
+ 	@echo "$(run_str)"
+diff --git a/buildroot-fs/Config.in b/buildroot-fs/Config.in
+index 80386746c..7a5009270 100755
+--- a/buildroot-fs/Config.in
++++ b/buildroot-fs/Config.in
+@@ -1 +1,2 @@
+ source "$BR2_EXTERNAL_ALPHADIAGS_PATH/package/klish/Config.in"
++source "$BR2_EXTERNAL_ALPHADIAGS_PATH/package/bsdiff/Config.in"
+diff --git a/buildroot-fs/configs/stark_rootfs_defconfig b/buildroot-fs/configs/stark_rootfs_defconfig
+index 420bace15..9cc0bdaa8 100755
+--- a/buildroot-fs/configs/stark_rootfs_defconfig
++++ b/buildroot-fs/configs/stark_rootfs_defconfig
+@@ -68,3 +68,4 @@ BR2_PACKAGE_TPM2_TOOLS=y
+ BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+ BR2_TARGET_ROOTFS_TAR_GZIP=y
+ BR2_PACKAGE_KLISH=y
++BR2_PACKAGE_BSDIFF=y
 diff --git a/rootfs.overlay/etc/init.d/S01boardid b/rootfs.overlay/etc/init.d/S01boardid
 index 2b7be3177..35b37435b 100755
 --- a/rootfs.overlay/etc/init.d/S01boardid
