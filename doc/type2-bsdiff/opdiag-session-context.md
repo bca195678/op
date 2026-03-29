@@ -40,13 +40,13 @@ the changes documented in the three files below.
 
 ---
 
-## The Three Reference Files (in `./tmp/`)
+## The Three Reference Files (in `./doc/type2-bsdiff/`)
 
 | File | Purpose |
 |------|---------|
-| `./tmp/type2-to-type2-bsdiff.diff` | Exact `git diff` of all changes vs type2 base |
-| `./tmp/type2-to-type2-bsdiff-changes.md` | Human-readable change summary with rationale |
-| `./tmp/type2-bsdiff-guide.md` | Full implementation guide including new package files |
+| `./doc/type2-bsdiff/type2-to-type2-bsdiff.diff` | Exact `git diff` of all changes vs type2 base |
+| `./doc/type2-bsdiff/type2-to-type2-bsdiff-changes.md` | Human-readable change summary with rationale |
+| `./doc/type2-bsdiff/type2-bsdiff-guide.md` | Full implementation guide including new package files |
 
 These three files together fully describe what the new branch must contain.
 **The diff covers changes to existing files. The guide covers new files that must be created.**
@@ -71,24 +71,48 @@ A `bsdiff` between them is only ~5.8 MB.
 
 ### 1. New Buildroot Package: `buildroot-fs/package/bsdiff/`
 
-Five files to create (see `./tmp/type2-bsdiff-guide.md` Part 1 for exact content):
+Five files to create (see `./doc/type2-bsdiff/type2-bsdiff-guide.md` Part 1 for exact content):
 
 ```
 buildroot-fs/package/bsdiff/
 ├── Config.in
 ├── bsdiff.mk
-├── bsdiff-4.3.tar.gz   (25KB tarball — must be created from bsdiff.c + bspatch.c + bzlib.h)
+├── bsdiff-4.3.tar.gz   (25KB — assembled from bsdiff.c + bspatch.c + bzlib.h, see below)
 ├── bsdiff.c
 └── bzlib.h
 ```
 
-The tarball `bsdiff-4.3.tar.gz` contains `bsdiff.c`, `bspatch.c`, and `bzlib.h` from the
-[bsdiff 4.3 source](http://www.daemonology.net/bsdiff/) (BSD-2-Clause). The guide shows how to
-obtain and package them.
+#### Obtaining the source files
+
+Run these commands **on the build server** (or any Linux host with internet access), then copy
+the results into `buildroot-fs/package/bsdiff/`:
+
+```bash
+cd /tmp
+
+# 1. Download bsdiff 4.3 source (BSD-2-Clause, Colin Percival)
+wget https://distfiles.freebsd.org/distfiles/bsdiff-4.3.tar.gz
+tar xzf bsdiff-4.3.tar.gz            # extracts bsdiff-4.3/bsdiff.c and bsdiff-4.3/bspatch.c
+cp bsdiff-4.3/bsdiff.c bsdiff-4.3/bspatch.c .
+
+# 2. Get bzlib.h from bzip2 source (Docker has libbz2 runtime but not dev headers)
+wget https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+tar xzf bzip2-1.0.8.tar.gz           # extracts bzip2-1.0.8/bzlib.h
+cp bzip2-1.0.8/bzlib.h .
+
+# 3. Create the custom tarball that buildroot will use as BSDIFF_SOURCE
+tar czf bsdiff-4.3.tar.gz bsdiff.c bspatch.c bzlib.h
+```
+
+Then on the build server, copy into the repo:
+```bash
+cp /tmp/bsdiff.c /tmp/bspatch.c /tmp/bzlib.h /tmp/bsdiff-4.3.tar.gz \
+   ~/project/opdiag/stark-diag/buildroot-fs/package/bsdiff/
+```
 
 ### 2. Modify Existing Files (apply the diff)
 
-The diff at `./tmp/type2-to-type2-bsdiff.diff` covers:
+The diff at `./doc/type2-bsdiff/type2-to-type2-bsdiff.diff` covers:
 - `Makefile` — add `host_bsdiff` compile rule and `apply_bsdiff` target
 - `buildroot-fs/Config.in` — register bsdiff package
 - `buildroot-fs/configs/stark_rootfs_defconfig` — enable bsdiff package

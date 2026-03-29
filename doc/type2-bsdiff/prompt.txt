@@ -1,0 +1,13 @@
+Read ./doc/type2-bsdiff/opdiag-session-context.md to get full project context.
+
+Then read these three files:
+1. ./doc/type2-bsdiff/type2-to-type2-bsdiff-changes.md  — change summary with rationale
+2. ./doc/type2-bsdiff/type2-bsdiff-guide.md             — full implementation guide
+3. ./doc/type2-bsdiff/type2-to-type2-bsdiff.diff        — exact diff to apply
+
+Task: on build server chester@172.31.230.36, in ~/project/opdiag/stark-diag/:
+1. Confirm/checkout branch opdiag-with-fjord-type2
+2. Create branch opdiag-with-fjord-type2-bsdiff from it
+3. Obtain source files and create buildroot-fs/package/bsdiff/ (guide Part 1)
+4. Apply the diff to the 4 existing files
+5. Do NOT commit or push anything without my explicit approval

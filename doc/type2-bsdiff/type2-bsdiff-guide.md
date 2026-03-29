@@ -81,6 +81,37 @@ endef
 $(eval $(generic-package))
 ```
 
+### Obtaining the Source Files
+
+The package directory contains three source files (`bsdiff.c`, `bspatch.c`, `bzlib.h`) and a
+tarball (`bsdiff-4.3.tar.gz`) that buildroot uses as `BSDIFF_SOURCE`. Assemble them as follows
+on the build server (or any Linux host with internet access):
+
+```bash
+cd /tmp
+
+# 1. bsdiff 4.3 — Colin Percival, BSD-2-Clause
+wget https://distfiles.freebsd.org/distfiles/bsdiff-4.3.tar.gz
+tar xzf bsdiff-4.3.tar.gz
+cp bsdiff-4.3/bsdiff.c bsdiff-4.3/bspatch.c .
+
+# 2. bzlib.h — Docker image has libbz2.so.1 runtime but NOT libbz2-dev headers
+wget https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+tar xzf bzip2-1.0.8.tar.gz
+cp bzip2-1.0.8/bzlib.h .
+
+# 3. Repackage into the custom tarball buildroot expects
+tar czf bsdiff-4.3.tar.gz bsdiff.c bspatch.c bzlib.h
+
+# 4. Copy everything into the package directory
+cp bsdiff.c bspatch.c bzlib.h bsdiff-4.3.tar.gz \
+   ~/project/opdiag/stark-diag/buildroot-fs/package/bsdiff/
+```
+
+> `bspatch.c` is only needed inside the tarball (buildroot extracts it to cross-compile for
+> AArch64). `bsdiff.c` and `bzlib.h` are also kept directly in the package directory for the
+> Makefile host compilation rule (which does not unpack the tarball).
+
 To activate the package, run `make gen-rootfs` and commit the new `rootfs.tar.gz`.
 
 ---
