@@ -69,74 +69,59 @@ A `bsdiff` between them is only ~5.8 MB.
 
 ## Changes Required (Summary)
 
-### 1. New Buildroot Package: `buildroot-fs/package/bsdiff/`
+### 1. New Source Directory: `buildroot-fs/package/bsdiff/`
 
-Five files to create (see `./doc/type2-bsdiff/type2-bsdiff-guide.md` Part 1 for exact content):
+Three source files to add (see `./doc/type2-bsdiff/type2-bsdiff-guide.md` Part 1):
 
 ```
 buildroot-fs/package/bsdiff/
-├── Config.in
-├── bsdiff.mk
-├── bsdiff-4.3.tar.gz   (25KB — assembled from bsdiff.c + bspatch.c + bzlib.h, see below)
-├── bsdiff.c
-└── bzlib.h
+├── bsdiff.c    — compiled by Makefile for host (x86-64 bsdiff)
+├── bspatch.c   — cross-compiled by Makefile for target (AArch64 bspatch)
+└── bzlib.h     — bzip2 header (libbz2-dev not in Docker)
 ```
+
+No buildroot `Config.in` or `bsdiff.mk` — the Makefile handles both tools directly.
 
 #### Obtaining the source files
 
-Run these commands **on the build server** (or any Linux host with internet access), then copy
-the results into `buildroot-fs/package/bsdiff/`:
+Run these commands **on the build server** (or any Linux host with internet access):
 
 ```bash
 cd /tmp
 
 # 1. Download bsdiff 4.3 source (BSD-2-Clause, Colin Percival)
 wget https://distfiles.freebsd.org/distfiles/bsdiff-4.3.tar.gz
-tar xzf bsdiff-4.3.tar.gz            # extracts bsdiff-4.3/bsdiff.c and bsdiff-4.3/bspatch.c
+tar xzf bsdiff-4.3.tar.gz
 cp bsdiff-4.3/bsdiff.c bsdiff-4.3/bspatch.c .
 
 # 2. Get bzlib.h from bzip2 source (Docker has libbz2 runtime but not dev headers)
 wget https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
-tar xzf bzip2-1.0.8.tar.gz           # extracts bzip2-1.0.8/bzlib.h
+tar xzf bzip2-1.0.8.tar.gz
 cp bzip2-1.0.8/bzlib.h .
 
-# 3. Create the custom tarball that buildroot will use as BSDIFF_SOURCE
-tar czf bsdiff-4.3.tar.gz bsdiff.c bspatch.c bzlib.h
-```
-
-Then on the build server, copy into the repo:
-```bash
-cp /tmp/bsdiff.c /tmp/bspatch.c /tmp/bzlib.h /tmp/bsdiff-4.3.tar.gz \
+cp bsdiff.c bspatch.c bzlib.h \
    ~/project/opdiag/stark-diag/buildroot-fs/package/bsdiff/
 ```
 
 ### 2. Modify Existing Files (apply the diff)
 
 The diff at `./doc/type2-bsdiff/type2-to-type2-bsdiff.diff` covers:
-- `Makefile` — add `host_bsdiff` compile rule and `apply_bsdiff` target
-- `buildroot-fs/Config.in` — register bsdiff package
-- `buildroot-fs/configs/stark_rootfs_defconfig` — enable bsdiff package
+- `Makefile` — add `host_bsdiff` + `target_bspatch` compile rules and `apply_bsdiff` target
 - `rootfs.overlay/etc/init.d/S01boardid` — boot-time plugin reconstruction logic
 
 ---
 
 ## Build Workflow After Implementing
 
-### One-time: update rootfs.tar.gz
-
-```bash
-# Inside Docker (from stark-diag directory)
-make gen-rootfs
-```
-
-This cross-compiles `bspatch` for AArch64 and installs it to `/alpha/bin/bspatch` inside
-`rootfs.tar.gz`. Commit the updated `rootfs.tar.gz`.
-
 ### Every build
 
 ```bash
 bash docker.sh make all -j32
 ```
+
+This compiles `bsdiff` (host x86-64) and `bspatch` (target AArch64) inline from source,
+installs `bspatch` into the staging rootfs, generates the patch, and packs the image.
+No `make gen-rootfs` step required.
 
 Expected image size: ~45.5 MB (in `~/project/opdiag/stark-diag/image/`)
 

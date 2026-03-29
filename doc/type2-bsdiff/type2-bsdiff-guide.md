@@ -26,11 +26,9 @@ patch. At boot, the init script `S01boardid` reconstructs `fjord.so` on Fjord bo
 
 | # | File | What | When |
 |---|------|------|------|
-| 1 | `Makefile` | Host bsdiff build rule + `apply_bsdiff` target | Every `make all` |
+| 1 | `Makefile` | Host bsdiff + target bspatch build rules + `apply_bsdiff` target | Every `make all` |
 | 2 | `rootfs.overlay/etc/init.d/S01boardid` | Reconstruct `fjord.so` from patch at boot | Runtime |
-| 3 | `buildroot-fs/Config.in` | Register bsdiff package | `make gen-rootfs` |
-| 4 | `buildroot-fs/configs/stark_rootfs_defconfig` | Enable bsdiff package | `make gen-rootfs` |
-| 5 | `buildroot-fs/package/bsdiff/` | New package: builds `bspatch` for AArch64 target | `make gen-rootfs` |
+| 3 | `buildroot-fs/package/bsdiff/` | Source files for both tools (3 files, no buildroot package) | `make all` |
 
 ---
 
@@ -38,54 +36,30 @@ patch. At boot, the init script `S01boardid` reconstructs `fjord.so` on Fjord bo
 
 | Tool | Role | How provided |
 |------|------|-------------|
-| `bsdiff` | Computes delta at build time (host) | Compiled from source by Makefile on every `make all` |
-| `bspatch` | Applies patch at boot time (target) | Cross-compiled by buildroot, installed into `rootfs.tar.gz` via `make gen-rootfs` |
+| `bsdiff` | Computes delta at build time (host x86-64) | Compiled from source by Makefile on every `make all` |
+| `bspatch` | Applies patch at boot time (target AArch64) | Cross-compiled from source by Makefile on every `make all` |
 
-### Why two different mechanisms?
-
-`make all` does not invoke buildroot — it unpacks the pre-built `rootfs.tar.gz` and overlays
-platform-specific components. So:
-
-- **`bspatch`** goes into `rootfs.tar.gz` via buildroot (`make gen-rootfs`) — built once,
-  committed, available on all machines.
-- **`bsdiff`** is compiled inline during `make all` from `buildroot-fs/package/bsdiff/bsdiff.c`.
-  A single C file takes under a second. No manual setup required on any machine.
+Both tools are single C files. Compilation takes under a second each. No manual setup,
+no `make gen-rootfs`, no binary artifacts committed to `rootfs.tar.gz`.
 
 ---
 
-## Part 1: The bsdiff Buildroot Package
+## Part 1: Source Files — `buildroot-fs/package/bsdiff/`
 
-The package lives at `buildroot-fs/package/bsdiff/`:
+The package directory holds three source files used directly by the Makefile:
 
 ```
 buildroot-fs/package/bsdiff/
-├── Config.in           — menuconfig entry
-├── bsdiff.mk           — build rules (cross-compiles bspatch for AArch64)
-├── bsdiff-4.3.tar.gz   — source tarball (bsdiff.c + bspatch.c + bzlib.h)
-├── bsdiff.c            — also kept directly for Makefile host compilation
-└── bzlib.h             — bzip2 header (libbz2-dev not installed in Docker image)
+├── bsdiff.c    — compiled by Makefile for host (x86-64 bsdiff)
+├── bspatch.c   — cross-compiled by Makefile for target (AArch64 bspatch)
+└── bzlib.h     — bzip2 header (libbz2-dev not installed in Docker image)
 ```
 
-**`bsdiff.mk`** uses `generic-package`. It cross-compiles only `bspatch.c` for the target and
-installs it to `/alpha/bin/bspatch`:
-
-```makefile
-define BSDIFF_BUILD_CMDS
-    $(TARGET_CC) $(TARGET_CFLAGS) -I$(@D) -o $(@D)/bspatch $(@D)/bspatch.c -lbz2
-endef
-
-define BSDIFF_INSTALL_TARGET_CMDS
-    $(INSTALL) -D -m 755 $(@D)/bspatch $(TARGET_DIR)/alpha/bin/bspatch
-endef
-
-$(eval $(generic-package))
-```
+No buildroot `Config.in` or `bsdiff.mk` — the Makefile handles both tools directly.
 
 ### Obtaining the Source Files
 
-The package directory contains three source files (`bsdiff.c`, `bspatch.c`, `bzlib.h`) and a
-tarball (`bsdiff-4.3.tar.gz`) that buildroot uses as `BSDIFF_SOURCE`. Assemble them as follows
-on the build server (or any Linux host with internet access):
+Run these commands on the build server (or any Linux host with internet access):
 
 ```bash
 cd /tmp
@@ -95,33 +69,25 @@ wget https://distfiles.freebsd.org/distfiles/bsdiff-4.3.tar.gz
 tar xzf bsdiff-4.3.tar.gz
 cp bsdiff-4.3/bsdiff.c bsdiff-4.3/bspatch.c .
 
-# 2. bzlib.h — Docker image has libbz2.so.1 runtime but NOT libbz2-dev headers
+# 2. bzlib.h — Docker has libbz2.so.1 runtime but NOT libbz2-dev headers
 wget https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
 tar xzf bzip2-1.0.8.tar.gz
 cp bzip2-1.0.8/bzlib.h .
 
-# 3. Repackage into the custom tarball buildroot expects
-tar czf bsdiff-4.3.tar.gz bsdiff.c bspatch.c bzlib.h
-
-# 4. Copy everything into the package directory
-cp bsdiff.c bspatch.c bzlib.h bsdiff-4.3.tar.gz \
+# 3. Copy into the package directory
+cp bsdiff.c bspatch.c bzlib.h \
    ~/project/opdiag/stark-diag/buildroot-fs/package/bsdiff/
 ```
 
-> `bspatch.c` is only needed inside the tarball (buildroot extracts it to cross-compile for
-> AArch64). `bsdiff.c` and `bzlib.h` are also kept directly in the package directory for the
-> Makefile host compilation rule (which does not unpack the tarball).
-
-To activate the package, run `make gen-rootfs` and commit the new `rootfs.tar.gz`.
-
 ---
 
-## Part 2: Makefile — Host bsdiff + apply_bsdiff
+## Part 2: Makefile — Host bsdiff + Target bspatch + `apply_bsdiff`
 
-Two additions to the top-level `Makefile`:
+Three additions to the top-level `Makefile`:
 
 ```makefile
-host_bsdiff := $(build_dir)/host/bsdiff
+host_bsdiff   := $(build_dir)/host/bsdiff
+target_bspatch := $(build_dir)/target/bspatch
 
 $(host_bsdiff): $(buildroot_external_dir)/package/bsdiff/bsdiff.c
 	@mkdir -p $(dir $@)
@@ -129,7 +95,13 @@ $(host_bsdiff): $(buildroot_external_dir)/package/bsdiff/bsdiff.c
 		-o $@ $< \
 		-L/usr/lib/x86_64-linux-gnu -l:libbz2.so.1
 
-apply_bsdiff: $(host_bsdiff)
+$(target_bspatch): $(buildroot_external_dir)/package/bsdiff/bspatch.c
+	@mkdir -p $(dir $@)
+	$(CROSS_COMPILE)gcc -O2 -I$(buildroot_external_dir)/package/bsdiff \
+		-o $@ $< -lbz2
+
+apply_bsdiff: $(host_bsdiff) $(target_bspatch)
+	install -D -m 755 $(target_bspatch) $(rootfs-temp_dir)/alpha/bin/bspatch
 	@echo ":: Creating bsdiff patch stark->fjord"
 	@if [ -f $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so ]; then \
 		$(host_bsdiff) \
@@ -141,10 +113,17 @@ apply_bsdiff: $(host_bsdiff)
 	fi
 ```
 
-- `$(host_bsdiff)` is a real file target — Make only recompiles if `bsdiff.c` is newer.
-- `gcc` and `libbz2.so.1` are both available inside the Docker build container.
-- `bzlib.h` is provided in the package directory (Docker has runtime libbz2 but not the
-  dev headers).
+> **Note:** `$(CROSS_COMPILE)` is set to `aarch64-broadcom-linux-gnu-` by `env.mk` and
+> exported into the build environment. The toolchain lives at
+> `/opt/project/broadcom/XLDK_6.3.2/toolchain-a55-glibc/bin`.
+
+- Both `$(host_bsdiff)` and `$(target_bspatch)` are real file targets — Make only recompiles
+  if the corresponding `.c` source is newer.
+- `gcc` and `libbz2.so.1` are available inside the Docker build container (x86-64).
+- The AArch64 cross-compiler and its `libbz2` are available via the buildroot toolchain.
+- `bzlib.h` is provided in the package directory (Docker has runtime libbz2 but not headers).
+- `apply_bsdiff` installs `bspatch` to `/alpha/bin/bspatch` in the staging rootfs before
+  the CPIO is packed.
 
 ---
 
@@ -176,16 +155,6 @@ fi
 
 ## Part 4: Build
 
-### First time (or after `make clean-rootfs`)
-
-Run buildroot to cross-compile `bspatch` into `rootfs.tar.gz`:
-
-```bash
-make gen-rootfs
-```
-
-Then commit the updated `rootfs.tar.gz`.
-
 ### Every build
 
 ```bash
@@ -193,11 +162,14 @@ bash docker.sh make all -j32
 ```
 
 The build sequence:
-1. `rootfs.tar.gz` is unpacked (contains `bspatch` at `/alpha/bin/bspatch`)
+1. `rootfs.tar.gz` is unpacked
 2. `$(host_bsdiff)` is compiled from `bsdiff.c` (sub-second)
-3. Both plugins are compiled and stripped
-4. `apply_bsdiff` runs: generates `stark_to_fjord.patch`, deletes `fjord.so`
-5. CPIO is packed and LZMA-compressed
+3. `$(target_bspatch)` is cross-compiled from `bspatch.c` (sub-second)
+4. Both plugins are compiled and stripped
+5. `apply_bsdiff` runs: installs `bspatch`, generates `stark_to_fjord.patch`, deletes `fjord.so`
+6. CPIO is packed and LZMA-compressed
+
+No `make gen-rootfs` step required. No `rootfs.tar.gz` update needed.
 
 ---
 
@@ -225,7 +197,6 @@ Expected: full POST, 9/10 PASS, `alphadiags:/#` prompt.
 |------|--------|
 | `Makefile` | `git add` (modified) |
 | `rootfs.overlay/etc/init.d/S01boardid` | `git add` (modified) |
-| `buildroot-fs/Config.in` | `git add` (modified) |
-| `buildroot-fs/configs/stark_rootfs_defconfig` | `git add` (modified) |
-| `buildroot-fs/package/bsdiff/` | `git add` (new directory — all 5 files) |
-| `rootfs.tar.gz` | `git add` after running `make gen-rootfs` |
+| `buildroot-fs/package/bsdiff/bsdiff.c` | `git add` (new file) |
+| `buildroot-fs/package/bsdiff/bspatch.c` | `git add` (new file) |
+| `buildroot-fs/package/bsdiff/bzlib.h` | `git add` (new file) |
