@@ -1,0 +1,121 @@
+diff --git a/Makefile b/Makefile
+index 474153c88..8d4885f29 100755
+--- a/Makefile
++++ b/Makefile
+@@ -62,7 +62,19 @@ image: simplify_rootfs release_info $(cpio_file)$(rootfs_ext)
+ 		&& ls -l \
+ 		&& cat $(project_name).$(project_version).md5
+ 
+-$(cpio_file)$(rootfs_ext): simplify_rootfs release_info
++apply_bsdiff:
++	@echo ":: Creating bsdiff patch stark->fjord"
++	@if [ -f $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so ]; then \
++		$(HOME)/bin/bsdiff \
++			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_stark.so \
++			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so \
++			$(rootfs-temp_dir)/alpha/lib/module/stark_to_fjord.patch; \
++		rm $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so; \
++		echo "Fjord patch created"; \
++	fi
++
++
++$(cpio_file)$(rootfs_ext): simplify_rootfs release_info apply_bsdiff
+ 	@echo "$(build_str)"
+ 	@echo "Creating CPIO and compressing..."
+ 	@fakeroot -- $(cpio_script) "$(rootfs-temp_dir)" "$(cpio_file)"
+diff --git a/diagnostics/diagk-fjord/image/Makefile b/diagnostics/diagk-fjord/image/Makefile
+index 283f0ba83..2f51217d0 100755
+--- a/diagnostics/diagk-fjord/image/Makefile
++++ b/diagnostics/diagk-fjord/image/Makefile
+@@ -20,6 +20,7 @@ run: runtime
+ 	$(OBJCOPY) --only-keep-debug $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME).debug
+ 	gzip -f $(O)/$(MODULE_NAME).debug
+ 	$(OBJCOPY) --strip-all $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME)
++	$(OBJCOPY) --remove-section=.eh_frame --remove-section=.eh_frame_hdr --remove-section=.comment $(O)/$(MODULE_NAME)
+ 	$(RM) $(O)/$(MODULE_NAME).dbg
+ 
+ runtime:
+diff --git a/diagnostics/diagk-stark/image/Makefile b/diagnostics/diagk-stark/image/Makefile
+index 283f0ba83..2f51217d0 100755
+--- a/diagnostics/diagk-stark/image/Makefile
++++ b/diagnostics/diagk-stark/image/Makefile
+@@ -20,6 +20,7 @@ run: runtime
+ 	$(OBJCOPY) --only-keep-debug $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME).debug
+ 	gzip -f $(O)/$(MODULE_NAME).debug
+ 	$(OBJCOPY) --strip-all $(O)/$(MODULE_NAME).dbg $(O)/$(MODULE_NAME)
++	$(OBJCOPY) --remove-section=.eh_frame --remove-section=.eh_frame_hdr --remove-section=.comment $(O)/$(MODULE_NAME)
+ 	$(RM) $(O)/$(MODULE_NAME).dbg
+ 
+ runtime:
+diff --git a/docker.sh b/docker.sh
+index b2182630a..1897eace5 100755
+--- a/docker.sh
++++ b/docker.sh
+@@ -47,6 +47,8 @@ DOCKER_ARGS=(
+     -e "USER_GID=$(id -g)"
+     -e "HOME=${HOME}"
+     -v "${PROJECT_ROOT}:${PROJECT_ROOT}"
++    -v "/usr/bin/ld.lld:/opt/project/broadcom/XLDK_6.3.2/toolchain-a55-glibc/bin/ld.lld"
++    -v "/lib/x86_64-linux-gnu/libLLVM-14.so.1:/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1"
+     -w "${PROJECT_ROOT}"
+     --sig-proxy=true
+     --rm
+diff --git a/rootfs.overlay/etc/init.d/S01boardid b/rootfs.overlay/etc/init.d/S01boardid
+index 2b7be3177..35b37435b 100755
+--- a/rootfs.overlay/etc/init.d/S01boardid
++++ b/rootfs.overlay/etc/init.d/S01boardid
+@@ -20,7 +20,22 @@ echo "Board family: $FAMILY"
+ 
+ case "$1" in
+   start)
+-  	start
++	start
++	# Reconstruct family-specific plugin from bsdiff patch
++	PLUGIN_DIR="/alpha/lib/module"
++	PATCH="${PLUGIN_DIR}/stark_to_fjord.patch"
++	STARK="${PLUGIN_DIR}/clish_plugin_mfg_stark.so"
++	FJORD="${PLUGIN_DIR}/clish_plugin_mfg_fjord.so"
++	if [ -f "${PATCH}" ]; then
++	    if [ "$FAMILY" = "fjord" ]; then
++	        echo "Reconstructing fjord plugin from patch..."
++	        /alpha/bin/bspatch "${STARK}" "${FJORD}" "${PATCH}"
++	        rm "${STARK}" "${PATCH}"
++	        echo "Fjord plugin ready"
++	    else
++	        rm "${PATCH}"
++	    fi
++	fi
+ 	;;
+   stop)
+ 	;;
+@@ -32,4 +47,3 @@ case "$1" in
+ esac
+ 
+ exit $?
+-
+diff --git a/rootfs.overlay/init b/rootfs.overlay/init
+index 6b81ca9d0..15aebb1ab 100755
+--- a/rootfs.overlay/init
++++ b/rootfs.overlay/init
+@@ -5,18 +5,18 @@
+ prep_opdiag()
+ {
+     local backup="$@"
+-    local OPDDIAG_DEV=
++    local OPDIAG_DEV=
+ 
+     set -- $(cat /proc/cmdline)
+     for x in "$@"; do
+         case "$x" in
+             # Development/Debug option
+             opdiag_debug_for_internal_use)
+-                local OPDIAG_DEV=1
++                OPDIAG_DEV=1
+                 ;;
+             # # Comment - Only for internal debug use.
+             # opdiag_linuxsh|opdiag_stop_if_fail|opdiag_no_reboot)
+-            #     local OPDIAG_DEV=1
++            #     OPDIAG_DEV=1
+             #     ;;
+             *)
+                 ;;
