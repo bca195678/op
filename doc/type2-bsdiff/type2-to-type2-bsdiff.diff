@@ -1,0 +1,80 @@
+diff --git a/Makefile b/Makefile
+index 474153c88..f1e0741f0 100755
+--- a/Makefile
++++ b/Makefile
+@@ -79,6 +79,26 @@ release_info: rootfs.diag
+ 	@echo export IMAGE_NAME=\"$(project_name).$(project_version)\" >>$(release_tag)
+ 	@chmod a-wx $(release_tag)
+
+
++host_bsdiff := $(build_dir)/host/bsdiff
++
++$(host_bsdiff): $(buildroot_external_dir)/package/bsdiff/bsdiff.c
++	@mkdir -p $(dir $@)
++	gcc -O2 -I$(buildroot_external_dir)/package/bsdiff \
++		-o $@ $< \
++		-L/usr/lib/x86_64-linux-gnu -l:libbz2.so.1
++
++apply_bsdiff: $(host_bsdiff)
++	@echo ":: Creating bsdiff patch stark->fjord"
++	@if [ -f $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so ]; then \
++		$(host_bsdiff) \
++			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_stark.so \
++			$(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so \
++			$(rootfs-temp_dir)/alpha/lib/module/stark_to_fjord.patch; \
++		rm $(rootfs-temp_dir)/alpha/lib/module/clish_plugin_mfg_fjord.so; \
++		echo "Fjord patch created"; \
++	fi
++
+ ##### Remove unused files (headers, static libraries, documentation...)
+ simplify_rootfs: rootfs.diag
+ 	@echo "$(run_str)"
+diff --git a/buildroot-fs/Config.in b/buildroot-fs/Config.in
+index 80386746c..7a5009270 100755
+--- a/buildroot-fs/Config.in
++++ b/buildroot-fs/Config.in
+@@ -1 +1,2 @@
+ source "$BR2_EXTERNAL_ALPHADIAGS_PATH/package/klish/Config.in"
++source "$BR2_EXTERNAL_ALPHADIAGS_PATH/package/bsdiff/Config.in"
+diff --git a/buildroot-fs/configs/stark_rootfs_defconfig b/buildroot-fs/configs/stark_rootfs_defconfig
+index 420bace15..9cc0bdaa8 100755
+--- a/buildroot-fs/configs/stark_rootfs_defconfig
++++ b/buildroot-fs/configs/stark_rootfs_defconfig
+@@ -68,3 +68,4 @@ BR2_PACKAGE_TPM2_TOOLS=y
+ BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+ BR2_TARGET_ROOTFS_TAR_GZIP=y
+ BR2_PACKAGE_KLISH=y
++BR2_PACKAGE_BSDIFF=y
+diff --git a/rootfs.overlay/etc/init.d/S01boardid b/rootfs.overlay/etc/init.d/S01boardid
+index 2b7be3177..35b37435b 100755
+--- a/rootfs.overlay/etc/init.d/S01boardid
++++ b/rootfs.overlay/etc/init.d/S01boardid
+@@ -20,7 +20,22 @@ echo "Board family: $FAMILY"
+
+ case "$1" in
+   start)
+-  	start
++	start
++	# Reconstruct family-specific plugin from bsdiff patch
++	PLUGIN_DIR="/alpha/lib/module"
++	PATCH="${PLUGIN_DIR}/stark_to_fjord.patch"
++	STARK="${PLUGIN_DIR}/clish_plugin_mfg_stark.so"
++	FJORD="${PLUGIN_DIR}/clish_plugin_mfg_fjord.so"
++	if [ -f "${PATCH}" ]; then
++	    if [ "$FAMILY" = "fjord" ]; then
++	        echo "Reconstructing fjord plugin from patch..."
++	        /alpha/bin/bspatch "${STARK}" "${FJORD}" "${PATCH}"
++	        rm "${STARK}" "${PATCH}"
++	        echo "Fjord plugin ready"
++	    else
++	        rm "${PATCH}"
++	    fi
++	fi
+ 	;;
+   stop)
+ 	;;
+@@ -32,4 +47,3 @@ case "$1" in
+ esac
+
+ exit $?
+-
