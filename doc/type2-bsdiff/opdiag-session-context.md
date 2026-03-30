@@ -31,12 +31,12 @@ Two branches exist on the build server's **stark-diag** repo:
 | Branch | Description | Status |
 |--------|-------------|--------|
 | `opdiag-with-fjord-type2` | Dual plugin image (stark.so + fjord.so both bundled) | **Committed, base branch** |
-| `opdiag-with-fjord-type2-bsdiff` | Reduced image: stark.so + 5.8MB patch only | **Does NOT exist yet** — must be created |
+| `opdiag-with-fjord-type2-bsdiff` | Reduced image: stark.so + 5.8MB patch only | **Exists on build server — changes applied, not yet committed** |
 
 ### Goal
 
-Create `opdiag-with-fjord-type2-bsdiff` by branching off `opdiag-with-fjord-type2` and applying
-the changes documented in the three files below.
+`opdiag-with-fjord-type2-bsdiff` has been created and the changes applied. Build tested and
+verified (9/10 POST PASS on Stark board, image ~51 MB). Pending commit approval.
 
 ---
 
@@ -63,7 +63,7 @@ A `bsdiff` between them is only ~5.8 MB.
 - At boot on a **Fjord board**: `bspatch` reconstructs `fjord.so` from the patch
 - At boot on a **Stark board**: the patch is simply deleted
 
-**Result: image drops from 59.8 MB → ~45.5 MB**
+**Result: image drops from ~60 MB → ~51 MB** (measured 2026-03-29)
 
 ---
 
@@ -84,20 +84,19 @@ No buildroot `Config.in` or `bsdiff.mk` — the Makefile handles both tools dire
 
 #### Obtaining the source files
 
-Run these commands **on the build server** (or any Linux host with internet access):
+Run these commands **on the build server** using `apt-get source` (reliable on the Debian build
+environment). The FreeBSD wget URLs are a fallback only.
 
 ```bash
 cd /tmp
 
-# 1. Download bsdiff 4.3 source (BSD-2-Clause, Colin Percival)
-wget https://distfiles.freebsd.org/distfiles/bsdiff-4.3.tar.gz
-tar xzf bsdiff-4.3.tar.gz
-cp bsdiff-4.3/bsdiff.c bsdiff-4.3/bspatch.c .
+# 1. bsdiff 4.3 source via apt (preferred)
+apt-get source bsdiff
+cp bsdiff-*/bsdiff.c bsdiff-*/bspatch.c .
 
-# 2. Get bzlib.h from bzip2 source (Docker has libbz2 runtime but not dev headers)
-wget https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
-tar xzf bzip2-1.0.8.tar.gz
-cp bzip2-1.0.8/bzlib.h .
+# 2. bzlib.h via dpkg (Docker has libbz2 runtime but not dev headers)
+apt-get download libbz2-dev && dpkg -x libbz2-dev_*.deb /tmp/bz2-extract
+find /tmp/bz2-extract -name bzlib.h | xargs -I{} cp {} .
 
 cp bsdiff.c bspatch.c bzlib.h \
    ~/project/opdiag/stark-diag/buildroot-fs/package/bsdiff/
@@ -123,7 +122,7 @@ This compiles `bsdiff` (host x86-64) and `bspatch` (target AArch64) inline from 
 installs `bspatch` into the staging rootfs, generates the patch, and packs the image.
 No `make gen-rootfs` step required.
 
-Expected image size: ~45.5 MB (in `~/project/opdiag/stark-diag/image/`)
+Expected image size: ~51 MB (in `~/project/opdiag/stark-diag/image/`)
 
 ---
 
@@ -147,7 +146,8 @@ setenv bootargs 'console=ttyS0,115200 opdiag_mode=normal'
 ```
 
 Expected result: full POST, 9/10 PASS (internal flash FAIL is expected in netboot mode),
-`alphadiags:/#` prompt.
+then automatic reboot back to U-Boot. The board does not stay at `alphadiags:/#` — it runs
+diagnostics and reboots. "Fjord patch created" should appear in the build log (not boot log).
 
 To see serial output, add `opdiag_debug_for_internal_use` to bootargs.
 

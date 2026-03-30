@@ -1,7 +1,16 @@
 diff --git a/Makefile b/Makefile
-index 474153c88..f1e0741f0 100755
+index 474153c88..887ab2deb 100755
 --- a/Makefile
 +++ b/Makefile
+@@ -62,7 +62,7 @@ image: simplify_rootfs release_info $(cpio_file)$(rootfs_ext)
+ 		&& ls -l \
+ 		&& cat $(project_name).$(project_version).md5
+
+-$(cpio_file)$(rootfs_ext): simplify_rootfs release_info
++$(cpio_file)$(rootfs_ext): simplify_rootfs release_info apply_bsdiff
+ 	@echo "$(build_str)"
+ 	@echo "Creating CPIO and compressing..."
+ 	@fakeroot -- $(cpio_script) "$(rootfs-temp_dir)" "$(cpio_file)"
 @@ -79,6 +79,32 @@ release_info: rootfs.diag
  	@echo export IMAGE_NAME=\"$(project_name).$(project_version)\" >>$(release_tag)
  	@chmod a-wx $(release_tag)
@@ -19,7 +28,8 @@ index 474153c88..f1e0741f0 100755
 +$(target_bspatch): $(buildroot_external_dir)/package/bsdiff/bspatch.c
 +	@mkdir -p $(dir $@)
 +	$(CROSS_COMPILE)gcc -O2 -I$(buildroot_external_dir)/package/bsdiff \
-+		-o $@ $< -lbz2
++		-o $@ $< \
++		-L$(build_dir)/rootfs/usr/lib -l:libbz2.so.1
 +
 +apply_bsdiff: $(host_bsdiff) $(target_bspatch)
 +	install -D -m 755 $(target_bspatch) $(rootfs-temp_dir)/alpha/bin/bspatch
@@ -35,7 +45,6 @@ index 474153c88..f1e0741f0 100755
 +
  ##### Remove unused files (headers, static libraries, documentation...)
  simplify_rootfs: rootfs.diag
- 	@echo "$(run_str)"
 diff --git a/rootfs.overlay/etc/init.d/S01boardid b/rootfs.overlay/etc/init.d/S01boardid
 index 2b7be3177..35b37435b 100755
 --- a/rootfs.overlay/etc/init.d/S01boardid

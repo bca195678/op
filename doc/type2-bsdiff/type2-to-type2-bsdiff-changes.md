@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `opdiag-with-fjord-type2-bsdiff` branch reduces the final firmware image from **59.8MB → ~45.5MB**
+The `opdiag-with-fjord-type2-bsdiff` branch reduces the final firmware image from **59.8MB → ~51MB**
 by storing only one plugin in the image (`clish_plugin_mfg_stark.so`) plus a small binary delta
 patch, and reconstructing the Fjord plugin at boot time on Fjord boards.
 
@@ -18,7 +18,9 @@ patch, and reconstructing the Fjord plugin at boot time on Fjord boards.
   automatically as part of every `make all` (single C file, sub-second).
 - Added a Make rule that cross-compiles `bspatch.c` for AArch64 into
   `$(build_dir)/target/bspatch` using `$(CROSS_COMPILE)gcc` (`aarch64-broadcom-linux-gnu-gcc`)
-  and `-lbz2`. Runs automatically as part of every `make all` (single C file, sub-second).
+  and `-L$(build_dir)/rootfs/usr/lib -l:libbz2.so.1` (explicit path to the toolchain's libbz2,
+  not the host system `-lbz2`). Runs automatically as part of every `make all` (single C file,
+  sub-second).
 - Added `apply_bsdiff` target that depends on both `$(host_bsdiff)` and `$(target_bspatch)`:
   installs `bspatch` into `/alpha/bin/` in the staging rootfs, computes the binary delta
   between `stark.so` and `fjord.so`, writes `stark_to_fjord.patch`, then deletes `fjord.so`.
@@ -68,6 +70,6 @@ After the script runs, the filesystem contains exactly one plugin binary matchin
 
 | Variant | Image Size |
 |---------|-----------|
-| type2 (both plugins) | 59.8 MB |
-| type2-bsdiff (stark + patch) | **~45.5 MB** |
+| type2 (both plugins) | ~60 MB |
+| type2-bsdiff (stark + patch) | **~51 MB** |
 | type1 reference | ~43 MB |
