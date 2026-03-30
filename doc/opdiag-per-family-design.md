@@ -1,9 +1,10 @@
 # Per-Family Architecture for Fjord Support
 
-**Date:** 2026-03-24 (updated 2026-03-25)
+**Date:** 2026-03-24 (updated 2026-03-30)
 **Branches:**
 - `opdiag-with-fjord-type1` — monolithic (if/elif in shared codebase)
 - `opdiag-with-fjord-type2` — per-family, static SDK linking **(recommended)**
+- `opdiag-with-fjord-type2-bsdiff` — type2 + bsdiff image optimization (~51 MB)
 - `opdiag-with-fjord-type3` — per-family, dynamic SDK linking via `libsdk_bcm.so`
 
 **Build server:** `chester@172.31.230.36`, working dir: `~/project/opdiag/stark-diag`
@@ -67,6 +68,10 @@ The `opdiag` branch supports 4 Stark SKUs. The `opdiag-with-fjord-type1` branch 
 +============================================================================+
 ```
 
+> **type2-bsdiff variant:** `clish_plugin_mfg_fjord.so` is replaced by `stark_to_fjord.patch`
+> (~5.8 MB). The Fjord plugin is reconstructed at boot time by `bspatch` in `S01boardid`.
+> Image size: ~51 MB (vs ~60 MB for type2).
+
 ### Architecture Summary
 
 | Component | Approach | Image Contents |
@@ -102,6 +107,14 @@ The `opdiag` branch supports 4 Stark SKUs. The `opdiag-with-fjord-type1` branch 
 |       |                                   |
 |       v                                   |
 |  /tmp/board_family  (e.g. "stark")        |
+|                                           |
+|  [type2-bsdiff only]                      |
+|  if stark_to_fjord.patch exists:          |
+|    if family == "fjord":                  |
+|      bspatch stark.so fjord.so patch      |
+|      rm stark.so patch                    |
+|    else:                                  |
+|      rm patch           (~3-6s on Fjord)  |
 +-------------------------------------------+
     |
     v
@@ -476,6 +489,16 @@ stark-diag/
                                          v
                                 summit-stark.0.0.2-b6
                                    (60 MB FIT image)
+
+                    [type2-bsdiff: apply_bsdiff runs before CPIO]
+
+          alpha/lib/module/             host build/
+          plugin_stark.so    --(bsdiff)--> stark_to_fjord.patch (~5.8 MB)
+          plugin_fjord.so (deleted)     target build/bspatch -> alpha/bin/
+                   |
+                   v
+          summit-stark.0.0.2-b6
+             (51 MB FIT image)
 ```
 
 ### Type3 Build Flow Variant
@@ -661,33 +684,36 @@ Adding a 3rd family (e.g. "alpine", board_id 0x20-0x2F):
 
 ---
 
-## 10. Type1 vs Type2 vs Type3 Comparison
+## 10. Type1 vs Type2 vs Type2-bsdiff vs Type3 Comparison
 
-| | **Type1** | **Type2** | **Type3** |
-|---|---|---|---|
-| **Branch** | `opdiag-with-fjord-type1` | `opdiag-with-fjord-type2` | `opdiag-with-fjord-type3` |
-| **Approach** | Monolithic — if/elif in shared codebase | Per-family isolation, static SDK | Per-family isolation, dynamic SDK |
-| **diagk** | Single `diagnostics/diagk/` with conditionals | `diagk-stark/` + `diagk-fjord/` (independent) | Same as type2 |
-| **diagpy** | Single `diagnostics/diagpy/` with conditionals | `diagpy-stark/` + `diagpy-fjord/` (independent) | Same as type2 |
-| **SDK linking** | Static, one plugin | Static per family (~110MB each) | Dynamic — `libsdk_bcm.so` shared (~110MB once) |
-| **Plugin size** | ~110MB x 1 | ~110MB x 2 | ~300KB x 2 + 110MB shared lib |
-| **Image size** | ~45MB | ~60MB | ~45MB |
-| **Adding a family** | Add more if/elif branches everywhere | Add new directories, no existing code touched | Same as type2 |
-| **Risk** | Fjord change can break Stark | Fully isolated — zero cross-family risk | Same isolation, but shared SDK is a single point |
-| **Build complexity** | Low (one codebase) | Medium (duplicated source trees) | Higher (sdk_shared.mk, rpath, dynamic linking) |
-| **Debug complexity** | Low | Low (static = what you see is what you get) | Higher (dlopen symbol resolution) |
-| **Boot-time selection** | Code branches on board ID at runtime | `family_detect` dispatchers pick per-family binaries | Same as type2 |
-| **opdiag test (Stark)** | 9/10 PASS | 9/10 PASS | 9/10 PASS |
+| | **Type1** | **Type2** | **Type2-bsdiff** | **Type3** |
+|---|---|---|---|---|
+| **Branch** | `opdiag-with-fjord-type1` | `opdiag-with-fjord-type2` | `opdiag-with-fjord-type2-bsdiff` | `opdiag-with-fjord-type3` |
+| **Approach** | Monolithic — if/elif in shared codebase | Per-family isolation, static SDK | type2 + bsdiff patch to ship one plugin | Per-family isolation, dynamic SDK |
+| **diagk** | Single `diagnostics/diagk/` with conditionals | `diagk-stark/` + `diagk-fjord/` (independent) | Same as type2 | Same as type2 |
+| **diagpy** | Single `diagnostics/diagpy/` with conditionals | `diagpy-stark/` + `diagpy-fjord/` (independent) | Same as type2 | Same as type2 |
+| **SDK linking** | Static, one plugin | Static per family (~110MB each) | Same as type2 | Dynamic — `libsdk_bcm.so` shared (~110MB once) |
+| **Plugin size** | ~110MB x 1 | ~110MB x 2 | stark.so (~110MB) + patch (~5.8MB) | ~300KB x 2 + 110MB shared lib |
+| **Image size** | ~45MB | ~60MB | **~51MB** | ~45MB |
+| **Boot overhead** | None | None | ~3–6s on Fjord (bspatch); zero on Stark | None |
+| **Adding a family** | Add more if/elif branches everywhere | Add new directories, no existing code touched | Same as type2; each new family needs a patch | Same as type2 |
+| **Risk** | Fjord change can break Stark | Fully isolated — zero cross-family risk | Same as type2; bspatch is a known-good tool | Same isolation, but shared SDK is a single point |
+| **Build complexity** | Low (one codebase) | Medium (duplicated source trees) | type2 + bsdiff/bspatch compile rules | Higher (sdk_shared.mk, rpath, dynamic linking) |
+| **Debug complexity** | Low | Low (static = what you see is what you get) | Low; fjord.so is reconstructed at boot | Higher (dlopen symbol resolution) |
+| **Boot-time selection** | Code branches on board ID at runtime | `family_detect` dispatchers pick per-family binaries | Same as type2, with bspatch step in S01boardid | Same as type2 |
+| **opdiag test (Stark)** | 9/10 PASS | 9/10 PASS | 9/10 PASS (2026-03-29) | 9/10 PASS |
 
 ---
 
 ## 11. Recommendation
 
-**Use type2. Keep type3 as a known migration path.**
+**Use type2 or type2-bsdiff. Keep type3 as a known migration path.**
 
 **Type1 is a trap.** It feels simple with 2 families, but the if/elif branches grow fast — every function touching hardware needs a family check, every code review needs "did this Stark fix break Fjord?", and every CI run must test all families. With 42 differing files in diagk alone, a 3rd family would make the codebase painful.
 
 **Type2 is the right default.** Full isolation means a Fjord developer can't accidentally break Stark, adding a family is purely additive, and each family can diverge when needed. Static linking = no runtime surprises. The 15MB image penalty (60MB vs 45MB) is ~8 extra seconds of TFTP transfer on a 2GB DRAM platform.
+
+**Type2-bsdiff is a good middle ground** if image size matters. It recovers ~9MB vs type2 (51MB vs 60MB) with no architectural change — same codebase, same isolation. The trade-off is a ~3–6s boot penalty on Fjord boards (bspatch running once at every boot) and a slightly more complex build. Adding each new family requires generating a new patch file at build time. Committed and verified on 2026-03-29.
 
 **Type3 is premature optimization.** The `sdk_shared.mk`, `-rpath`, and `dlopen()` resolution add build and debug surface that doesn't pay for itself at 2 families. The break-even point is ~4-5 families where the image would otherwise exceed 100MB. When that happens, the type2-to-type3 migration is mechanical — swap `LIBS` for `LIBS_STATIC`/`LIBS_DYNAMIC` and add `sdk_shared.mk`.
 
@@ -699,6 +725,7 @@ Adding a 3rd family (e.g. "alpine", board_id 0x20-0x2F):
 
 - **Type1 是陷阱** — 兩個 family 看似簡單，但 if/elif 分支隨 family 數量快速增長。光是 diagk 就有 42 個檔案不同，第三個 family 會讓程式碼難以維護。
 - **Type2 是正確的預設選擇** — 完全隔離代表改一個 family 不可能影響另一個。靜態連結不會有執行期意外。Image 多 15MB 代價很低（TFTP 多傳約 8 秒）。
+- **Type2-bsdiff 是折衷方案** — 與 type2 架構相同，但 image 縮小約 9MB（60MB → 51MB）。代價是 Fjord 板子每次開機需要執行 bspatch（約 3–6 秒）。已於 2026-03-29 驗證。
 - **Type3 是過早優化** — `sdk_shared.mk`、`-rpath`、`dlopen()` 在只有 2 個 family 時還不划算。損益平衡點約在 4-5 個 family，屆時從 type2 遷移到 type3 是機械式操作。
 
-**總結：Type2 用約 15MB 換取簡潔性和完全隔離，對嵌入式診斷系統而言是划算的交易。**
+**總結：Type2 或 type2-bsdiff 用約 9–15MB 換取簡潔性和完全隔離，對嵌入式診斷系統而言是划算的交易。**
