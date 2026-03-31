@@ -82,7 +82,7 @@ Use the `$IMAGE` variable discovered in Step 1:
 
 ```bash
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
-  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 180 \
+  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 120 \
   --command "tftpboot 0x70000000 $IMAGE && bootm 0x70000000" \
   --raw --logfile ./tmp/netboot.log
 ```
@@ -117,7 +117,7 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 
 # 4. Download and boot (waits up to 180s for Linux prompt)
 PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
-  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 180 \
+  --device COM200 --baud 115200 --prompt "alphadiags:/#" --timeout 120 \
   --command "tftpboot 0x70000000 $IMAGE && bootm 0x70000000" \
   --raw --logfile ./tmp/netboot.log
 ```
