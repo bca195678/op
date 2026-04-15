@@ -171,6 +171,8 @@ These flags can be combined with any of the above:
 | `opdiag_stop_if_fail` | Pause at interactive CLI on first test failure |
 | `opdiag_linuxsh` | Skip POST entirely, drop to Linux shell |
 
+**These three flags are commented out by default** in `rootfs.overlay/etc/profile.d/99-opdiag.sh` (`parse_opdiag_opt()` function). To use them during development, uncomment the relevant `case` blocks in that file and rebuild. Remember to re-comment them before committing to production.
+
 Example — debug with no reboot (inspect results interactively):
 ```
 setenv bootargs 'console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_internal_use opdiag_no_reboot'
