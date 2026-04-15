@@ -163,6 +163,19 @@ If the image works → done. If not → go back to Step 1.
 | `console=ttyS0,115200 opdiag_mode=extended` | Extended test suite |
 | `console=ttyS0,115200` | Boot to shell only (no opdiag — missing opdiag_mode) |
 
+These flags can be combined with any of the above:
+
+| Flag | Effect |
+|------|--------|
+| `opdiag_no_reboot` | Drop to interactive CLI after POST completes instead of rebooting |
+| `opdiag_stop_if_fail` | Pause at interactive CLI on first test failure |
+| `opdiag_linuxsh` | Skip POST entirely, drop to Linux shell |
+
+Example — debug with no reboot (inspect results interactively):
+```
+setenv bootargs 'console=ttyS0,115200 opdiag_mode=normal opdiag_debug_for_internal_use opdiag_no_reboot'
+```
+
 ## Gotchas
 
 1. **Silent crashes** — `prep_opdiag()` in the init script redirects stdout/stderr to `/dev/null` in normal mode. Always use `opdiag_debug_for_internal_use` during development.
@@ -182,11 +195,23 @@ If the image works → done. If not → go back to Step 1.
 
 6. **Load address** — STARK DRAM is `0x60000000–0xdfffffff`. Always use `0x70000000`. The old AXN-2020 address `0x210000000` is out of range.
 
-7. **FIT config** — `bootm 0x70000000` with no `#config` suffix. The default FIT configuration `stark` is selected automatically.
+7. **FIT config** — `bootm 0x70000000` with no `#config` suffix. The default FIT configuration `stark` is selected automatically. **Exception: DIN-8T-8XE** (`4630R-8T-8XE-DN`, board ID 0x01) requires `bootm 0x70000000#pci` to enable PCIe for BCM56071 detection. Without `#pci`, PTP tests fail and unit 1 ports are invisible.
 
 8. **rootfs.overlay cache is the sneakiest** — Unlike diagpy (which at least requires a missing directory), the rootfs overlay is silently stale. If you edit `rootfs.overlay/alpha/bin/opdiag` and rebuild without `rm -rf build/rootfs`, the old opdiag is packaged into the image. Always verify: `grep 'your_change' build/rootfs/alpha/bin/opdiag` after rebuilding.
 
-9. **diagk XML syntax** — If `diagnostics/diagk/cli/xml/diag-cmd.xml` has malformed XML (e.g., missing attribute quotes), the CLI silently fails to load and opdiag crashes with `Unable to open file '/alpha/xml/diag-cmd.xml'`. Always validate XML after editing: `python3 -c "import xml.etree.ElementTree as ET; ET.parse('diagnostics/diagk/cli/xml/diag-cmd.xml'); print('OK')"`
+9. **opdiag runtime file naming** — The boot script `99-opdiag.sh` runs `/alpha/bin/opdiag` (generic name), NOT `/alpha/bin/opdiag-stark`. When manually copying overlay files for incremental builds, you must copy to **both**:
+   ```bash
+   cp rootfs.overlay/alpha/bin/opdiag build/rootfs/alpha/bin/opdiag
+   cp rootfs.overlay/alpha/bin/opdiag build/rootfs/alpha/bin/opdiag-stark
+   ```
+   The TOML config uses the `-stark` suffix (`opdiag-stark.toml`), but the script itself runs as `opdiag`.
+
+10. **BCM script types: `.soc` vs `.cint`** — BCM SDK has two script formats with different interpreters:
+    - `.soc` files → run with `bcmcmd "rcload /path/file.soc"` (BCM shell commands)
+    - `.cint` files → run with `bcmcmd "cint /path/file.cint"` (C interpreter syntax)
+    Using `rcload` on a `.cint` file causes `Unknown command` errors because C function calls (like `cint_reset()`) aren't valid shell commands.
+
+11. **diagk XML syntax** — If `diagnostics/diagk/cli/xml/diag-cmd.xml` has malformed XML (e.g., missing attribute quotes), the CLI silently fails to load and opdiag crashes with `Unable to open file '/alpha/xml/diag-cmd.xml'`. Always validate XML after editing: `python3 -c "import xml.etree.ElementTree as ET; ET.parse('diagnostics/diagk/cli/xml/diag-cmd.xml'); print('OK')"`
 
 ---
 

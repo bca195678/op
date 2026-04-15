@@ -141,6 +141,32 @@ top -b -n 1
 hostname
 ```
 
+## U-Boot Auto-Repeat Warning
+
+U-Boot repeats the **last command** when it receives a bare Enter (newline). The serial helper sends an initial newline to detect the prompt — this triggers auto-repeat of whatever command ran before (e.g., `tftpboot` runs again unexpectedly).
+
+**Workaround:** When you need to send a command after a long-running U-Boot command (like `tftpboot`), send **Ctrl+C first** to break the auto-repeat cycle, then send your actual command. Use a direct pyserial script:
+
+```python
+import serial, time, sys
+port = serial.Serial('COM200', 115200, timeout=1)
+port.reset_input_buffer()
+port.write(b'\x03')          # Ctrl+C breaks auto-repeat
+time.sleep(0.5)
+port.reset_input_buffer()
+port.write(b'bootm 0x70000000\r\n')  # now send real command
+# ... read output until prompt ...
+port.close()
+```
+
+**Or** combine `tftpboot` and `bootm` in a single serial_helper call using `&&` so there's no gap:
+
+```bash
+--command "tftpboot 0x70000000 $IMAGE && bootm 0x70000000"
+```
+
+This avoids the auto-repeat entirely because U-Boot processes both commands before returning to the prompt.
+
 ## U-Boot Common Commands
 
 ```bash

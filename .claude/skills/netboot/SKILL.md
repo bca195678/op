@@ -91,6 +91,12 @@ PYTHONIOENCODING=utf-8 "$PYTHON" .claude/skills/uart/serial_helper.py \
 
 > **Why `bootm 0x70000000` (no `#config`)?** The FIT image's default configuration is `stark`, so U-Boot selects the correct kernel/ramdisk/fdt combination automatically.
 
+> **Exception: DIN-8T-8XE requires `#pci` config.** Board `4630R-8T-8XE-DN` (board ID 0x01) has a BCM56071 ASIC connected via PCIe. The default `stark` configuration uses `stark.dtb` which has PCIe **disabled** — the BCM56071 won't be detected. Use `bootm 0x70000000#pci` to select `stark-dual-mac.dtb` with PCIe enabled:
+> ```
+> tftpboot 0x70000000 $IMAGE && bootm 0x70000000#pci
+> ```
+> Without `#pci`, BDE sees only 1 device (WH3+). With `#pci`, BDE sees 2 devices (WH3+ AXI + BCM56071 PCI). This affects PTP tests, loopback tests on unit 1 ports, and any BCM56071-dependent functionality.
+
 ---
 
 ## Complete Example
@@ -140,6 +146,8 @@ Expected boot sequence:
 | `TFTP error: 'File not found'` | Wrong filename or TFTP server not started | Verify file is in `./tmp/` and server is running |
 | `trying to overwrite reserved memory` | Load address outside DRAM range | Use `0x70000000` (platform default `loadaddr`) |
 | `Could not find configuration node` | Wrong FIT config name | Omit `#config` to use default, or check with `iminfo 0x70000000` |
+| BCM56071 not detected / BDE shows 1 device | DIN-8T-8XE booted without `#pci` | Use `bootm 0x70000000#pci` for PCIe-enabled DTB |
+| U-Boot re-runs `tftpboot` instead of `bootm` | Auto-repeat triggered by initial newline | Combine commands: `tftpboot ... && bootm ...` in one call, or send Ctrl+C first (see uart SKILL.md) |
 | TFTP transfer starts but stalls | TFTP server timeout expired | Restart server with longer `--timeout` |
 | Linux prompt never appears | Boot failure mid-way | Add `--raw` flag to see full console output |
 | `Running Power On Self Test...(Unknown mode)` then reboot | Missing `opdiag_mode` bootarg | Add `opdiag_mode=normal` to bootargs (required for summit-* opdiag images) |

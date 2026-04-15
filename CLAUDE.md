@@ -58,6 +58,29 @@ Standard configuration for the STARK network switch platform:
 - **Enter CLI from Linux shell:** `cli` (starts diagk Klish CLI)
 - **If device is at U-Boot:** type `boot` to boot into Linux
 
+## DIN-8T-8XE PCIe Boot
+
+Board `4630R-8T-8XE-DN` (board ID 0x01) has a BCM56071 ASIC on PCIe. It **must** boot with the `pci` FIT configuration:
+
+```
+bootm 0x70000000#pci
+```
+
+The default `stark` config uses `stark.dtb` (PCIe disabled). The `pci` config uses `stark-dual-mac.dtb` (PCIe enabled). Without `#pci`, BCM56071 is invisible — PTP, loopback on unit 1 ports, and snake tests all fail or skip.
+
+Other boards (DIN-8W-4X, RM-24W-8XE, RM-4MW-12W-4XE) use the default: `bootm 0x70000000`.
+
+## BCM Script Types
+
+BCM SDK uses two script formats with **different interpreters**:
+
+| Extension | Command | Syntax |
+|-----------|---------|--------|
+| `.soc` | `bcmcmd "rcload /path/file.soc"` | BCM shell commands (`mcsload`, `config`, etc.) |
+| `.cint` | `bcmcmd "cint /path/file.cint"` | C interpreter (variables, functions, `printf`) |
+
+**Never use `rcload` on `.cint` files** — it causes `Unknown command` errors because C function calls aren't valid BCM shell commands.
+
 ## Temporary Files
 
 All host-side logs, downloaded images, spec checkouts, and other transient files go in **`./tmp/`**:
